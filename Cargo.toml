@@ -1,0 +1,20 @@
+[package]
+name = "starfall-dominion"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+wgpu = { version = "28.0", default-features = false, features = ["std", "parking_lot", "vulkan", "gles", "wgsl"] }
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland", "wayland-dlopen", "x11"] }
+lntrn-app = { path = "../lantern-ui-2/crates/lntrn-app" }
+lntrn-ui = { path = "../lantern-ui-2/crates/lntrn-ui" }
+lntrn-render = { path = "../lantern-ui-2/crates/lntrn-render" }
+lntrn-math = { path = "../lantern-ui-2/crates/lntrn-math" }
+lntrn-text = { path = "../lantern-ui-2/crates/lntrn-text" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.dev]
+debug = 1
