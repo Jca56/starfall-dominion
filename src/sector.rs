@@ -1,6 +1,7 @@
 use crate::actions::{self, Action};
 use crate::camera::View;
-use crate::fleet::Travel;
+use crate::fleet::{self, Travel};
+use crate::fog::Fog;
 use crate::layout;
 use crate::planets::PLANETS;
 use crate::world::{Game, Side};
@@ -17,6 +18,11 @@ pub(crate) struct Sector {
     pub(crate) selected: Option<usize>,
     pub(crate) view: View,
     pub(crate) game: Game,
+    /// The fog as drawn. It trails the rules while a ship glides so the reveal
+    /// follows the ship, then catches up once nothing is moving.
+    pub(crate) chart: Fog,
+    /// The rules' fog version the chart last copied.
+    pub(crate) synced: u64,
     pub(crate) fleet_selected: bool,
     /// The order being played out on screen, if any.
     pub(crate) travel: Option<Travel>,
@@ -32,6 +38,8 @@ impl Default for Sector {
         Self {
             selected: None,
             view: View::starting_at(game.fleets[0].position),
+            chart: game.fog.clone(),
+            synced: game.fog.version(),
             game,
             fleet_selected: false,
             travel: None,
@@ -39,6 +47,17 @@ impl Default for Sector {
             message: None,
             move_requests: Vec::new(),
         }
+    }
+}
+
+impl Sector {
+    /// What lights the map on screen: the rules' view, except a gliding ship
+    /// shines from where it is drawn.
+    pub(crate) fn shown_vision_sources(&self, now: f64) -> Vec<(Vec2, f64)> {
+        let shown = fleet::shown_position(self, now);
+        self.game.vision_sources_shown(Side::Player, |fleet| {
+            if fleet.id == 0 { shown } else { fleet.position }
+        })
     }
 }
 
@@ -97,16 +116,22 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
         panel_background(ui, details);
         region(ui, details.shrink(25.0 * scale), "planet-details", |ui| {
             ui.heading(planet.name);
-            ui.label_dim(if planet.occupied {
-                "Dominion occupied"
-            } else {
-                "Free world"
+            let explored = sector.chart.explored_at(planet.position);
+            ui.label_dim(match (explored, planet.owner) {
+                (false, _) => "Uncharted",
+                (true, Some(Side::Player)) => "Your world",
+                (true, Some(Side::Dominion)) => "Dominion occupied",
+                (true, None) => "Free world",
             });
             if let Some(region) = layout::region_of(planet.position) {
                 ui.label_dim(&format!("Sector {}", region.name));
             }
             ui.space(15.0 * scale);
-            ui.paragraph(planet.description);
+            ui.paragraph(if explored {
+                planet.description
+            } else {
+                "Charted from afar. Send a ship to survey it."
+            });
             ui.space(20.0 * scale);
             if ui.button_wide("Close").clicked {
                 sector.selected = None;

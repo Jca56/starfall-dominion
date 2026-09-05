@@ -6,7 +6,7 @@ use crate::fleet;
 use crate::layout;
 use crate::planets::PLANETS;
 use crate::sector::Sector;
-use crate::world::WORLD_SIZE;
+use crate::world::{Side, WORLD_SIZE};
 
 /// Zoom per wheel pixel; one notch is about 1.2×.
 const WHEEL_ZOOM: f64 = 0.003;
@@ -14,6 +14,11 @@ const WHEEL_ZOOM: f64 = 0.003;
 /// shrink to dots and names hide, so the overview reads as space, not a board.
 const CHART_ZOOM: f64 = 0.3;
 const BORDER: Color = Color::hex(0x617A95);
+const PLAYER_COLOR: Color = Color::hex(0x8EDBE7);
+const DOMINION_COLOR: Color = Color::hex(0xF38F8F);
+const FREE_COLOR: Color = Color::hex(0xD9D2A6);
+/// A world charted from afar: position known, nothing else.
+const CHARTED: Color = Color::hex(0x8A9BB3);
 
 pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
     let scale = ui.m.scale;
@@ -31,6 +36,10 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
             fleet::order(sector, camera.to_world(point), now);
         }
     }
+    // Orders commit first so a fresh glide charts its start and asks for frames.
+    if fleet::advance(sector, now) {
+        ui.state.request_redraw_after(0.0);
+    }
 
     boundaries(ui, &camera);
     let ship_hit = fleet::hit_rect(&camera, sector, now, scale);
@@ -40,6 +49,8 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
     let chart = relative < CHART_ZOOM;
     let closeness = relative.sqrt().clamp(0.3, 1.5);
     let halo = 8.0 * scale * closeness.min(1.0);
+    let line = scale * 2.0 * closeness.clamp(0.6, 1.0);
+    let sources = sector.shown_vision_sources(now);
     for (index, planet) in PLANETS.iter().enumerate() {
         let point = camera.to_screen(planet.position);
         let radius = 26.0 * scale * closeness;
@@ -68,31 +79,50 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
         if response.hovered {
             ui.state.cursor_icon = CursorIcon::Pointer;
         }
-        let allegiance = if planet.occupied {
-            Color::hex(0xF38F8F)
+        let focus = if sector.selected == Some(index) || response.hovered {
+            1.0
         } else {
-            Color::hex(0x8EDBE7)
+            0.45
         };
-        ui.draw
-            .circle(point, radius + halo * 1.5, allegiance.fade(0.07));
-        ui.draw.ring(
-            point,
-            radius + halo,
-            scale * 2.0 * closeness.clamp(0.6, 1.0),
-            allegiance.fade(if sector.selected == Some(index) || response.hovered {
-                1.0
-            } else {
-                0.45
-            }),
-        );
-        ui.draw
-            .circle_gradient(point, radius, planet.color, planet.color.scale_rgb(0.2));
+        let explored = sector.chart.explored_at(planet.position);
+        // Surveyed worlds show what is there; in view they are lit, remembered they dim.
+        let lit = if !explored {
+            0.0
+        } else if sources
+            .iter()
+            .any(|(center, radius)| (planet.position - *center).length() <= *radius)
+        {
+            1.0
+        } else {
+            0.55
+        };
+        if explored {
+            let allegiance = allegiance(planet.owner).fade(lit);
+            ui.draw
+                .circle(point, radius + halo * 1.5, allegiance.fade(0.07));
+            ui.draw
+                .ring(point, radius + halo, line, allegiance.fade(focus));
+            ui.draw.circle_gradient(
+                point,
+                radius,
+                planet.color.fade(lit),
+                planet.color.scale_rgb(0.2).fade(lit),
+            );
+        } else {
+            // Charted from afar: the locals know where it is, not what is there.
+            ui.draw
+                .ring(point, radius * 0.75, line, CHARTED.fade(focus * 0.7 + 0.15));
+        }
         if !chart {
             let label = Rect::from_center_size(
                 point + Vec2::new(0.0, radius + 35.0 * scale),
                 Vec2::new(175.0 * scale, 45.0 * scale),
             );
-            ui.text_centered(planet.name, &ui.text_style(), label, ui.theme.text);
+            let text = ui
+                .theme
+                .text
+                .fade(if explored { lit.max(0.7) } else { 0.5 });
+            ui.text_centered(planet.name, &ui.text_style(), label, text);
         }
         ui.focus_ring(id, hit);
     }
@@ -105,6 +135,14 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
         if response.drag_delta != Vec2::ZERO {
             ui.state.request_rebuild = true;
         }
+    }
+}
+
+fn allegiance(owner: Option<Side>) -> Color {
+    match owner {
+        Some(Side::Player) => PLAYER_COLOR,
+        Some(Side::Dominion) => DOMINION_COLOR,
+        None => FREE_COLOR,
     }
 }
 

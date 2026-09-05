@@ -56,6 +56,27 @@ pub(crate) fn shown_position(sector: &Sector, now: f64) -> Vec2 {
     }
 }
 
+/// Play the glide forward: land finished orders, chart what the ship passes as it
+/// flies, and let the screen's chart catch up with the rules once nothing moves.
+/// Returns true while frames are still needed.
+pub(crate) fn advance(sector: &mut Sector, now: f64) -> bool {
+    if sector.travel.is_some_and(|travel| travel.done(now)) {
+        sector.travel = None;
+    }
+    if sector.travel.is_some() {
+        let vision = sector.game.fleets[0].vision;
+        let position = shown_position(sector, now);
+        sector.chart.reveal(position, vision);
+        sector.chart.touch();
+        return true;
+    }
+    if sector.synced != sector.game.fog.version() {
+        sector.chart = sector.game.fog.clone();
+        sector.synced = sector.game.fog.version();
+    }
+    false
+}
+
 pub(crate) fn hit_rect(camera: &Camera, sector: &Sector, now: f64, scale: f64) -> Rect {
     Rect::from_center_size(
         camera.to_screen(shown_position(sector, now)),
@@ -84,13 +105,6 @@ pub(crate) fn order(sector: &mut Sector, destination: Vec2, now: f64) {
 /// `chart`: the map is zoomed far out, so names hide and only the ship stays.
 pub(crate) fn draw(ui: &mut Ui, camera: &Camera, hit: Rect, sector: &mut Sector, chart: bool) {
     let scale = ui.m.scale;
-    let now = ui.now();
-    if sector.travel.is_some_and(|travel| travel.done(now)) {
-        sector.travel = None;
-    }
-    if sector.travel.is_some() {
-        ui.state.request_redraw_after(0.0);
-    }
     let id = ui.id("Farlight Scout");
     let mut response = ui.interact(id, hit, Sense::CLICK);
     if !hit.intersection(&ui.clip()).is_empty() {

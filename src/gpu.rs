@@ -6,6 +6,7 @@ use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
 use crate::AppResult;
+use crate::fog;
 use crate::interface::Interface;
 use lntrn_render::{Gpu, Images, Pass2d};
 use lntrn_text::TextEngine;
@@ -19,6 +20,9 @@ pub(crate) struct Renderer {
     pipeline: wgpu::RenderPipeline,
     viewport: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    fog_texture: wgpu::Texture,
+    /// The fog version last uploaded; the interface hands over newer ones.
+    fog_version: u64,
 }
 
 impl Renderer {
@@ -90,13 +94,43 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let fog_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Fog of war"),
+            size: fog_extent(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rg8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let fog_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Fog sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Starfield viewport"),
+            label: Some("Starfield backdrop"),
             layout: &pipeline.get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: viewport.as_entire_binding(),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: viewport.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(
+                        &fog_texture.create_view(&Default::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&fog_sampler),
+                },
+            ],
         });
 
         let gpu = Gpu {
@@ -116,6 +150,8 @@ impl Renderer {
             pipeline,
             viewport,
             bind_group,
+            fog_texture,
+            fog_version: 0,
         })
     }
 
@@ -151,6 +187,24 @@ impl Renderer {
             destination.copy_from_slice(&value.to_le_bytes());
         }
         self.gpu.queue.write_buffer(&self.viewport, 0, &bytes);
+        if let Some((version, cells)) = interface.fog_texture(self.fog_version) {
+            self.gpu.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.fog_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &cells,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(fog::COLUMNS as u32 * 2),
+                    rows_per_image: Some(fog::ROWS as u32),
+                },
+                fog_extent(),
+            );
+            self.fog_version = version;
+        }
         let mut encoder = self
             .gpu
             .device
@@ -189,6 +243,14 @@ impl Renderer {
         window.pre_present_notify();
         frame.present();
         Ok(())
+    }
+}
+
+fn fog_extent() -> wgpu::Extent3d {
+    wgpu::Extent3d {
+        width: fog::COLUMNS as u32,
+        height: fog::ROWS as u32,
+        depth_or_array_layers: 1,
     }
 }
 

@@ -1,6 +1,6 @@
 use super::*;
 use crate::camera::{Camera, ZoomRange};
-use crate::world::{SCOUT_SPEED, WORLD_SIZE};
+use crate::world::{SCOUT_SPEED, SCOUT_VISION, WORLD_SIZE};
 use lntrn_ui::{MouseButton, WheelDelta};
 
 fn frame(ui: &mut Interface, scale: f64) {
@@ -312,5 +312,84 @@ fn resizing_preserves_world_scale_and_backdrop_tracks_pan_and_zoom() {
     assert_eq!(
         ui.backdrop_uniform(PhysicalSize::new(1280, 800), 1.0)[3],
         0.0
+    );
+}
+
+#[test]
+fn fog_uploads_once_per_change_and_lights_only_what_you_can_see() {
+    use crate::fog::{CELL, COLUMNS, ROWS};
+    let mut ui = setup(1.0);
+    assert!(ui.fog_texture(0).is_none(), "The menu has no fog");
+    let start = widget(&ui, "main-menu", "Start Game");
+    click(&mut ui, start.center(), 1.0);
+    let (version, bytes) = ui.fog_texture(0).expect("A fresh map uploads its fog");
+    assert_eq!(bytes.len(), COLUMNS * ROWS * 2);
+    let cell = |point: Vec2| {
+        let index = ((point.y / CELL) as usize * COLUMNS + (point.x / CELL) as usize) * 2;
+        (bytes[index], bytes[index + 1])
+    };
+    let planet = |name: &str| {
+        crate::planets::PLANETS
+            .iter()
+            .find(|planet| planet.name == name)
+            .expect("a named planet")
+            .position
+    };
+    assert_eq!(
+        cell(planet("Arcadia")),
+        (255, 255),
+        "Home is charted and lit"
+    );
+    assert_eq!(cell(planet("Vesper")), (0, 0), "The far east is dark");
+    assert!(
+        ui.fog_texture(version).is_none(),
+        "Nothing changed, so nothing re-uploads"
+    );
+    let ship = widget(&ui, "sector-map", "Farlight Scout");
+    click(&mut ui, ship.center(), 1.0);
+    let view = &ui.sector.view;
+    let camera = Camera::new(map_region(1.0), 1.0, view.center, view.zoom);
+    let target = camera.to_screen(ui.sector.game.fleets[0].position + Vec2::new(100.0, 0.0));
+    right_click(&mut ui, target);
+    frame(&mut ui, 1.0);
+    let (moved, _) = ui
+        .fog_texture(version)
+        .expect("A move changes what is in view");
+    assert_ne!(moved, version);
+}
+
+#[test]
+fn the_chart_reveals_as_the_ship_glides_and_catches_up_when_it_lands() {
+    let mut ui = setup(1.0);
+    let start = widget(&ui, "main-menu", "Start Game");
+    click(&mut ui, start.center(), 1.0);
+    let ship = widget(&ui, "sector-map", "Farlight Scout");
+    click(&mut ui, ship.center(), 1.0);
+    let origin = ui.sector.game.fleets[0].position;
+    // In range only from the landing point, so it is charted by the rules at
+    // commit but shown only once the ship gets there.
+    let ahead = origin + Vec2::new(SCOUT_SPEED + SCOUT_VISION - 20.0, 0.0);
+    let view = &ui.sector.view;
+    let camera = Camera::new(map_region(1.0), 1.0, view.center, view.zoom);
+    let target = camera.to_screen(origin + Vec2::new(SCOUT_SPEED, 0.0));
+    right_click(&mut ui, target);
+    frame(&mut ui, 1.0);
+    assert!(
+        ui.sector.game.fog.explored_at(ahead),
+        "The rules chart the whole corridor at once"
+    );
+    assert!(
+        !ui.sector.chart.explored_at(ahead),
+        "The screen reveals only as far as the ship has flown"
+    );
+    let_motion_finish(&mut ui, 1.0);
+    assert!(ui.sector.chart.explored_at(ahead));
+    assert_eq!(
+        ui.sector.chart, ui.sector.game.fog,
+        "Landing syncs the chart to the rules"
+    );
+    assert!(
+        ui.wake_after().is_none(),
+        "A landed ship stops asking for frames"
     );
 }

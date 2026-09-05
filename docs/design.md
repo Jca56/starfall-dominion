@@ -37,6 +37,11 @@ code, two worlds per sector. Western worlds are free, eastern worlds are
 Dominion-held, and the middle is contested. These counts, names, positions, and
 descriptions are placeholders for exploring the layout, not settled lore or game
 rules. Planet details currently show a name, allegiance, sector, and description.
+Fog of war follows Alva's Age of Wonders reading: planet positions are always
+charted, but what is there stays unknown until surveyed; charted space out of
+view dims and remembers; future points of interest hide entirely until found.
+The scout sees 225 units and charts a corridor along each order; held worlds
+see 150. The game starts knowing only what Arcadia and the scout can see.
 Moves resolve immediately in this first version; the ship glides to its
 destination on screen while the rules have already placed it there. The camera
 starts on the home region, eases toward zoom and pan targets, and never leaves

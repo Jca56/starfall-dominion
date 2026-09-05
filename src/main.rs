@@ -2,6 +2,7 @@ mod actions;
 mod app;
 mod camera;
 mod fleet;
+mod fog;
 mod gpu;
 mod interface;
 mod layout;

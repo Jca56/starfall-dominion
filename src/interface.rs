@@ -154,6 +154,19 @@ impl Interface {
         backdrop.uniform(viewport, scale)
     }
 
+    /// Fog cells for the GPU whenever the chart changed since version `seen`.
+    pub(crate) fn fog_texture(&self, seen: u64) -> Option<(u64, Vec<u8>)> {
+        if self.screen != Screen::Sector {
+            return None;
+        }
+        let sector = &self.sector;
+        let version = sector.chart.version();
+        (version != seen).then(|| {
+            let sources = sector.shown_vision_sources(self.state.now);
+            (version, sector.chart.texture(&sources))
+        })
+    }
+
     pub(crate) fn needs_rebuild(&self) -> bool {
         self.state.request_rebuild
     }

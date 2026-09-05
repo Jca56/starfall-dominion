@@ -56,6 +56,22 @@ The starfield is drawn in screen space as parallax layers. They drift as the
 map pans, at a fraction of its speed, and only gently rescale with zoom, so
 zooming out never turns them into noise. Menus and HUD stay anchored to the window.
 
+## Fog of war
+
+The map is charted but not surveyed. Every planet's position is known from the
+start, since the people of the Expanse mapped their own home, but nothing else
+about a world is known until a ship has seen it: unsurveyed planets draw as
+faint hollow markers and their panel says "Uncharted". Space you have never seen
+is dark, space you have seen but cannot see right now is dim and remembers what
+was there, and space in view is lit. The scout sees 225 units, a little past one
+move, and charts a corridor along every order it flies; on screen the reveal
+follows the ship as it glides. A world you hold keeps
+150 units around it in view. You start knowing only what Arcadia and the scout
+can see. The chart lives in `src/fog.rs` as a grid of 10-unit cells and is
+uploaded to the GPU as a small texture whenever it changes; the starfield shader
+darkens the backdrop from it. Points of interest, once they exist, will be
+hidden entirely until discovered.
+
 ## Sectors and planets
 
 The map is divided into thirteen sectors traced from Alva's sketch: five in the
@@ -64,7 +80,8 @@ Their outlines live in `src/layout.rs` as polygons that share corner points, and
 a test checks that they tile the map exactly once. Until they are named they
 carry placeholder codes: L1 to L5, M1 to M3, R1 to R5.
 
-There are twenty-six planets, two per sector, listed in `src/planets.rs`. Five
+There are twenty-six planets, two per sector, listed in `src/planets.rs` with
+an owner: yours, the Dominion's, or free. Five
 have names: Arcadia, the home world next to the scout, plus Haven, Verdant,
 Cinder, and Vesper. The rest are placeholders named by sector code, such as
 L3-b. Farlight is the name of the whole region, not a planet.

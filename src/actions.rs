@@ -144,10 +144,15 @@ pub(crate) fn execute(
                 .iter_mut()
                 .find(|f| f.id == fleet_id)
                 .expect("validated fleet");
+            let (from, vision) = (fleet.position, fleet.vision);
             fleet.position = destination;
             fleet.remaining = (fleet.remaining - cost).max(0.0);
             if fleet.remaining < EPSILON {
                 fleet.remaining = 0.0;
+            }
+            // A ship charts everything it passes. Only the player keeps a chart for now.
+            if actor == Side::Player {
+                game.fog.reveal_path(from, destination, vision);
             }
         }
         (Action::EndTurn, Preview::EndTurn) => {
@@ -166,6 +171,8 @@ pub(crate) fn execute(
         }
         _ => unreachable!("preview corresponds to its action"),
     }
+    // Whatever moved or changed hands, what is in view changed with it.
+    game.fog.touch();
     Ok(result)
 }
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::world::SCOUT_SPEED;
+use crate::world::{SCOUT_SPEED, SCOUT_VISION};
 
 fn order(destination: Vec2) -> Action {
     Action::MoveFleet {
@@ -103,4 +103,33 @@ fn turn_handoff_refills_without_banking_unused_movement() {
     assert_eq!(game.active_side, Side::Player);
     assert_eq!(game.fleets[0].remaining, SCOUT_SPEED);
     assert_eq!(game.fleets[0].position, destination);
+}
+
+#[test]
+fn a_move_charts_the_corridor_it_flies_through() {
+    let mut game = Game::default();
+    let start = game.fleets[0].position;
+    let stop = start + Vec2::new(SCOUT_SPEED, 0.0);
+    let beyond = stop + Vec2::new(SCOUT_VISION + 20.0, 0.0);
+    let beside = start + Vec2::new(SCOUT_SPEED / 2.0, SCOUT_VISION - 10.0);
+    assert!(game.fog.explored_at(start));
+    assert!(
+        !game.fog.explored_at(beside),
+        "Not yet in range of anything"
+    );
+    assert!(!game.fog.explored_at(beyond));
+    let version = game.fog.version();
+    execute(&mut game, Side::Player, order(stop)).unwrap();
+    assert!(
+        game.fog
+            .explored_at(stop + Vec2::new(SCOUT_VISION - 20.0, 0.0))
+    );
+    assert!(
+        game.fog.explored_at(beside),
+        "The corridor along the way is charted"
+    );
+    assert!(!game.fog.explored_at(beyond));
+    assert_ne!(game.fog.version(), version);
+    assert!(game.can_see(Side::Player, stop + Vec2::new(SCOUT_VISION - 20.0, 0.0)));
+    assert!(!game.can_see(Side::Player, start - Vec2::new(SCOUT_VISION, 0.0)));
 }
