@@ -19,11 +19,14 @@ the display scale from the compositor; the renderer uses physical surface sizes.
 - **Left-click the scout:** select it and preview movement toward the cursor.
 - **Right-click the map:** commit the previewed move, capped at remaining range.
   The scout glides to its destination; the rules resolve the move instantly.
-- **End Turn:** advance through the enemy's placeholder pass and refresh movement.
+- **End Turn:** the round button in the bottom-right corner, with the turn
+  counter beside it. Advances through the enemy's placeholder pass and refreshes
+  movement.
 - **Drag empty map space / scroll:** pan / zoom. Zoom eases toward the cursor.
 - **Tab / Shift+Tab, Enter / Space:** navigate and activate widgets.
 - **Escape:** deselect a fleet or close planet details, then return to the menu.
-- **Menu:** return to the main menu. Starting again resets the rough map.
+- **Menu:** the only thing in the slim bar across the top. Returns to the main
+  menu; starting again resets the rough map.
 - **F11:** toggle borderless fullscreen. Use the window manager to close the game.
 
 The window redraws on input and keeps drawing while the camera or a ship is
@@ -49,7 +52,8 @@ three scout moves, so a move is a visible jump and anything on screen is at most
 three turns away. Zooming in stops when one move fills the screen. Zooming out
 stops when the whole map fits, and below 30% of the starting zoom the map turns
 into a star chart: planets shrink to dots and names hide while sector codes
-stay. The viewport never leaves the map, and space beyond the border is dimmed.
+stay. The camera's centre stays on the map, so it can look half a screen past
+the edge and still centre a ship at the border; space beyond the border is dimmed.
 Resizing the window reveals more or less space without rescaling distances.
 
 The starfield is drawn in screen space as parallax layers. They drift as the

@@ -177,12 +177,14 @@ fn clamp_center(center: Vec2, zoom: f64, region: Rect, scale: f64) -> Vec2 {
     )
 }
 
-/// The viewport stays inside the map; a viewport wider than the map centers it.
+/// The camera's centre stays on the map, so it can look half a screen past the
+/// edge and still centre a ship at the border. A viewport wider than the map
+/// centres the map instead.
 fn clamp_axis(center: f64, half: f64, size: f64) -> f64 {
     if half >= size * 0.5 {
         size * 0.5
     } else {
-        center.clamp(half, size - half)
+        center.clamp(0.0, size)
     }
 }
 
@@ -305,8 +307,11 @@ mod tests {
         let mut view = View::starting_at(Vec2::new(300.0, 1000.0));
         assert!(!view.step(0.0, region, scale));
         assert_eq!(view.zoom, range.start);
-        // Nothing left of the map edge is visible.
-        assert!(view.center.x * view.zoom * scale >= region.width() * 0.5 - 1e-6);
+        assert_eq!(view.center, Vec2::new(300.0, 1000.0));
+        // The camera may look past the edge, but its centre stays on the map.
+        let mut edge = View::starting_at(Vec2::new(-100.0, 2500.0));
+        edge.step(0.0, region, scale);
+        assert_eq!(edge.center, Vec2::new(0.0, WORLD_SIZE.y));
 
         let anchor = Vec2::new(500.0 * scale, 300.0 * scale);
         let world = Camera::new(region, scale, view.center, view.zoom).to_world(anchor);

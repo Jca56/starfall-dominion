@@ -6,13 +6,14 @@ use crate::layout;
 use crate::planets::PLANETS;
 use crate::world::{Game, Side};
 use lntrn_math::{Color, Rect, Vec2};
-use lntrn_ui::Ui;
+use lntrn_ui::{Response, Sense, Ui, WidgetId};
 
 use crate::interface::{panel_background, region};
 
-/// Logical heights of the title bar and the turn controls that frame the map.
-const TOP_BAR: f64 = 95.0;
-const BOTTOM_BAR: f64 = 110.0;
+/// Logical height of the slim bar across the top that holds the menu button.
+const TOP_BAR: f64 = 75.0;
+/// Logical diameter of the round End Turn button in the bottom-right corner.
+const END_TURN_SIZE: f64 = 150.0;
 
 pub(crate) struct Sector {
     pub(crate) selected: Option<usize>,
@@ -61,33 +62,23 @@ impl Sector {
     }
 }
 
-/// The map between the title bar and the turn controls, in physical pixels.
+/// The map below the top bar, in physical pixels. It runs to the bottom edge;
+/// the turn controls float over it.
 pub(crate) fn map_region(bounds: Rect, scale: f64) -> Rect {
-    Rect::new(
-        Vec2::new(0.0, TOP_BAR * scale),
-        bounds.max - Vec2::new(0.0, BOTTOM_BAR * scale),
-    )
+    Rect::new(Vec2::new(0.0, TOP_BAR * scale), bounds.max)
 }
 
 pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
     let scale = ui.m.scale;
     let bar = Rect::from_xywh(0.0, 0.0, bounds.width(), TOP_BAR * scale);
-    ui.fill_square(bar, Color::hex(0x101925));
-    ui.hline(bar.max.y, 0.0, bounds.max.x, Color::hex(0x43546E));
-    let title = Rect::from_xywh(
-        30.0 * scale,
-        10.0 * scale,
-        bounds.width() - 195.0 * scale,
-        70.0 * scale,
-    );
-    let style = ui.text_style().bold();
-    ui.text_in_rect("FARLIGHT EXPANSE", &style, title, ui.theme.text);
+    ui.fill_square(bar, Color::hex(0x05070C));
+    ui.hline(bar.max.y, 0.0, bounds.max.x, Color::hex(0x1E2633));
     let mut menu = false;
     region(
         ui,
         Rect::from_xywh(
             bounds.max.x - 145.0 * scale,
-            15.0 * scale,
+            5.0 * scale,
             115.0 * scale,
             65.0 * scale,
         ),
@@ -96,6 +87,19 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
             menu = ui.button_wide("Menu").clicked;
         },
     );
+
+    // The End Turn button floats over the map. It takes its click before the
+    // map's pan can, and is drawn after the map so it sits on top.
+    let end_turn = Rect::from_center_size(
+        bounds.max - Vec2::splat((25.0 + END_TURN_SIZE * 0.5) * scale),
+        Vec2::splat(END_TURN_SIZE * scale),
+    );
+    let (end_turn_id, end_turn_response) = end_turn_interact(ui, end_turn);
+    // A right-click on the button is not an order for the map underneath.
+    sector
+        .move_requests
+        .retain(|point| !end_turn.contains(*point));
+
     let map = map_region(bounds, scale);
     let details = Rect::from_xywh(
         bounds.max.x - 380.0 * scale,
@@ -139,62 +143,76 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
             }
         });
     }
-    if sector.fleet_selected {
-        let fleet = &sector.game.fleets[0];
-        let label = format!(
-            "Movement: {:.0} / {:.0} units",
-            fleet.remaining, fleet.speed
-        );
-        let text_rect = Rect::from_xywh(
-            25.0 * scale,
-            bounds.max.y - 100.0 * scale,
-            bounds.width() - 390.0 * scale,
-            40.0 * scale,
-        );
-        ui.text_in_rect(
-            fleet.name,
-            &ui.text_style().bold(),
-            text_rect,
-            ui.theme.text,
-        );
-        ui.text_in_rect(
-            &label,
-            &ui.text_style(),
-            text_rect.translate(Vec2::new(0.0, 40.0 * scale)),
-            ui.theme.text_dim,
-        );
-    }
-    let turn_rect = Rect::from_xywh(
-        bounds.max.x - 350.0 * scale,
-        bounds.max.y - 100.0 * scale,
-        325.0 * scale,
-        85.0 * scale,
-    );
-    region(ui, turn_rect, "turn-controls", |ui| {
-        ui.row(|ui| {
-            ui.label(&format!("Turn {}", sector.game.turn));
-            let action = Action::EndTurn;
-            let response = ui.button(action.definition().name);
-            ui.tooltip(&response, action.definition().description);
-            if response.clicked {
-                let result = actions::execute(&mut sector.game, Side::Player, action)
-                    // Until an enemy planner exists, the Dominion passes through the same rules.
-                    .and_then(|_| {
-                        actions::execute(&mut sector.game, Side::Dominion, Action::EndTurn)
-                    });
-                sector.message = result.err().map(|error| error.to_string());
-                ui.state.request_rebuild = true;
-            }
-        });
-    });
+    end_turn_draw(ui, end_turn, end_turn_id, &end_turn_response, sector);
     if let Some(message) = &sector.message {
         let rect = Rect::from_xywh(
             25.0 * scale,
-            100.0 * scale,
+            (TOP_BAR + 10.0) * scale,
             bounds.width() - 50.0 * scale,
             50.0 * scale,
         );
         ui.text_in_rect(message, &ui.text_style(), rect, Color::hex(0xF3BB8F));
     }
     menu
+}
+
+/// Claim input for the End Turn button before the map is drawn.
+fn end_turn_interact(ui: &mut Ui, rect: Rect) -> (WidgetId, Response) {
+    let mut result = None;
+    region(ui, rect, "turn-controls", |ui| {
+        let id = ui.id(Action::EndTurn.definition().name);
+        let mut response = ui.interact(id, rect, Sense::CLICK);
+        ui.focusable(id, rect);
+        ui.key_click(id, &mut response);
+        result = Some((id, response));
+    });
+    result.expect("the turn controls region ran")
+}
+
+/// A large round button with the turn counter beside it, drawn over the map.
+fn end_turn_draw(ui: &mut Ui, rect: Rect, id: WidgetId, response: &Response, sector: &mut Sector) {
+    let scale = ui.m.scale;
+    let action = Action::EndTurn;
+    let center = rect.center();
+    let radius = rect.width() * 0.5;
+    let strength = if response.hovered || response.held {
+        1.0
+    } else {
+        0.6
+    };
+    ui.draw
+        .circle(center, radius, Color::hex(0x101925).fade(0.94));
+    ui.draw.ring(
+        center,
+        radius - 1.5 * scale,
+        3.0 * scale,
+        ui.theme.accent.fade(strength),
+    );
+    ui.text_centered(
+        action.definition().name,
+        &ui.text_style().bold(),
+        rect,
+        ui.theme.text,
+    );
+    let counter = Rect::from_xywh(
+        rect.min.x - 170.0 * scale,
+        center.y - 25.0 * scale,
+        160.0 * scale,
+        50.0 * scale,
+    );
+    ui.text_centered(
+        &format!("Turn {}", sector.game.turn),
+        &ui.text_style(),
+        counter,
+        ui.theme.text_dim,
+    );
+    ui.tooltip(response, action.definition().description);
+    ui.focus_ring(id, rect);
+    if response.clicked {
+        let result = actions::execute(&mut sector.game, Side::Player, action)
+            // Until an enemy planner exists, the Dominion passes through the same rules.
+            .and_then(|_| actions::execute(&mut sector.game, Side::Dominion, Action::EndTurn));
+        sector.message = result.err().map(|error| error.to_string());
+        ui.state.request_rebuild = true;
+    }
 }

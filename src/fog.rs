@@ -1,6 +1,7 @@
 //! What the player has charted. Planet positions are known from the start; fog
 //! hides what is there. Explored cells stay known, and what is lit right now comes
 //! from the fleets and worlds that can see it.
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use lntrn_math::Vec2;
@@ -12,11 +13,24 @@ pub(crate) const CELL: f64 = 10.0;
 pub(crate) const COLUMNS: usize = (WORLD_SIZE.x / CELL) as usize;
 pub(crate) const ROWS: usize = (WORLD_SIZE.y / CELL) as usize;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct Fog {
     explored: Vec<bool>,
     /// Changes whenever knowledge or lighting changes; the renderer re-uploads then.
     version: u64,
+}
+
+/// Sixty thousand cells would drown a test failure; summarise instead.
+impl fmt::Debug for Fog {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let charted = self.explored.iter().filter(|cell| **cell).count();
+        write!(
+            f,
+            "Fog {{ charted: {charted}/{}, version: {} }}",
+            self.explored.len(),
+            self.version
+        )
+    }
 }
 
 fn next_version() -> u64 {

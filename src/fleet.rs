@@ -8,9 +8,10 @@ use crate::camera::Camera;
 use crate::sector::Sector;
 use crate::world::Side;
 
-/// World units per second a ship covers on screen; short hops still take a beat.
-const GLIDE_SPEED: f64 = 240.0;
-const GLIDE_SECONDS: (f64, f64) = (0.2, 0.9);
+/// World units per second a ship covers on screen: a full scout move takes well
+/// over a second, so it reads as flying rather than flashing across.
+const GLIDE_SPEED: f64 = 110.0;
+const GLIDE_SECONDS: (f64, f64) = (0.3, 1.8);
 const ACCENT: Color = Color::hex(0xA2E7FF);
 
 /// A committed order playing out on screen. The rules moved the fleet instantly.
@@ -42,8 +43,9 @@ impl Travel {
     }
 
     fn position(&self, now: f64) -> Vec2 {
-        // Ease out: the ship leaves briskly and settles gently.
-        let t = 1.0 - (1.0 - self.progress(now)).powi(3);
+        // Ease in and out: the ship gathers way, cruises, and settles.
+        let p = self.progress(now);
+        let t = p * p * (3.0 - 2.0 * p);
         self.from + (self.to - self.from) * t
     }
 }
