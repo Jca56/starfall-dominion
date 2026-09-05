@@ -1,7 +1,9 @@
 use lntrn_math::Vec2;
 
-pub(crate) const WORLD_SIZE: Vec2 = Vec2::new(1000.0, 700.0);
-pub(crate) const SCOUT_SPEED: f64 = 100.0;
+pub(crate) const WORLD_SIZE: Vec2 = Vec2::new(3000.0, 2000.0);
+/// A scout is fast: an average ship moves 100 per turn. It crosses the map in about
+/// twenty turns and a sector in about seven.
+pub(crate) const SCOUT_SPEED: f64 = 150.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Side {
@@ -35,7 +37,7 @@ impl Default for Game {
                 id: 0,
                 name: "Farlight Scout",
                 owner: Side::Player,
-                position: Vec2::new(130.0, 500.0),
+                position: Vec2::new(300.0, 1000.0),
                 speed: SCOUT_SPEED,
                 remaining: SCOUT_SPEED,
             }],

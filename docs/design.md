@@ -24,13 +24,24 @@
 
 ## Current scaffold
 
-Start Game opens a 1000 × 700 unit map with five selectable planets, three rough
-sector divisions, and a player scout. The scout has 100 movement units per turn.
-These dimensions and movement values are provisional. Three worlds are free and
-two are occupied. These counts, planet names, positions,
-and descriptions are placeholders for exploring the layout, not settled lore or
-game rules. Planet details currently show a name, allegiance, and description.
-Moves resolve immediately in this first version. End Turn hands control to the
+Start Game opens a 3,000 × 2,000 unit map with thirteen sectors traced from
+Alva's sketch (five west, three middle, five east), twenty-six selectable
+planets, and a player scout. Units are abstract; what matters is the ratios.
+The scout moves 150 units per turn (an average ship will move about 100), so
+neighbouring planets are two or three turns apart, a sector takes about seven
+turns to cross, and the map about twenty. The camera starts three scout moves
+wide so a move is a visible jump, and pulls back into a star chart when zoomed
+far out. These dimensions and movement values are provisional. Five planets are named: Arcadia is the home world; Farlight is
+the region, not a planet. The other twenty-one are placeholders named by sector
+code, two worlds per sector. Western worlds are free, eastern worlds are
+Dominion-held, and the middle is contested. These counts, names, positions, and
+descriptions are placeholders for exploring the layout, not settled lore or game
+rules. Planet details currently show a name, allegiance, sector, and description.
+Moves resolve immediately in this first version; the ship glides to its
+destination on screen while the rules have already placed it there. The camera
+starts on the home region, eases toward zoom and pan targets, and never leaves
+the map. The starfield is a screen-space parallax backdrop rather than a
+world-anchored texture. End Turn hands control to the
 Dominion, which currently passes, then increments the counter and refills player
 movement. There is no enemy planner, fog of war, or save/load yet.
 

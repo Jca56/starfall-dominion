@@ -85,8 +85,8 @@ impl Renderer {
             cache: None,
         });
         let viewport = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Viewport size and compositor scale"),
-            size: 16,
+            label: Some("Starfield backdrop"),
+            size: 48,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -141,14 +141,12 @@ impl Renderer {
     ) -> Result<(), wgpu::SurfaceError> {
         let frame = self.surface.get_current_texture()?;
         let view = frame.texture.create_view(&Default::default());
-        // Encode one WGSL vec4 without an external byte-casting crate or unsafe code.
-        let values = [
-            self.config.width as f32,
-            self.config.height as f32,
-            window.scale_factor() as f32,
-            0.0,
-        ];
-        let mut bytes = [0_u8; 16];
+        // Encode three WGSL vec4s without an external byte-casting crate or unsafe code.
+        let values = interface.backdrop_uniform(
+            PhysicalSize::new(self.config.width, self.config.height),
+            window.scale_factor(),
+        );
+        let mut bytes = [0_u8; 48];
         for (destination, value) in bytes.chunks_exact_mut(4).zip(values) {
             destination.copy_from_slice(&value.to_le_bytes());
         }
@@ -213,5 +211,19 @@ fn block_on<T>(future: impl Future<Output = T>) -> T {
             Poll::Ready(value) => return value,
             Poll::Pending => std::thread::park(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The GPU only checks the shader at launch; catch mistakes headlessly instead.
+    #[test]
+    fn starfield_shader_parses_and_validates() {
+        let source = include_str!("starfield.wgsl");
+        let module = wgpu::naga::front::wgsl::parse_str(source)
+            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(source)));
+        wgpu::naga::valid::Validator::new(Default::default(), Default::default())
+            .validate(&module)
+            .expect("The starfield shader must validate");
     }
 }

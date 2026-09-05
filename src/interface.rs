@@ -5,6 +5,7 @@ use lntrn_ui::{CursorIcon, Event, Key, Modifiers, Theme, Ui, UiState, WidgetId};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 
+use crate::camera::Backdrop;
 use crate::sector::{self, Sector};
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -28,12 +29,10 @@ pub(crate) struct Interface {
 
 impl Default for Interface {
     fn default() -> Self {
-        let mut state = UiState::new();
-        state.reduce_motion = true;
         Self {
             text: TextEngine::new("Inter", "JetBrains Mono"),
             draw: DrawList::new(),
-            state,
+            state: UiState::new(),
             theme: Theme {
                 text_size: 30.0,
                 heading_size: 45.0,
@@ -143,8 +142,25 @@ impl Interface {
         }
     }
 
+    /// The starfield uniforms for this frame: three `vec4<f32>` values.
+    pub(crate) fn backdrop_uniform(&self, size: PhysicalSize<u32>, scale: f64) -> [f32; 12] {
+        let viewport = Vec2::new(size.width as f64, size.height as f64);
+        let backdrop = if self.screen == Screen::MainMenu {
+            Backdrop::menu()
+        } else {
+            let bounds = Rect::from_min_size(Vec2::ZERO, viewport);
+            Backdrop::sector(&self.sector.view, sector::map_region(bounds, scale), scale)
+        };
+        backdrop.uniform(viewport, scale)
+    }
+
     pub(crate) fn needs_rebuild(&self) -> bool {
         self.state.request_rebuild
+    }
+
+    /// Seconds until something on screen wants another frame; `None` when idle.
+    pub(crate) fn wake_after(&self) -> Option<f64> {
+        self.state.wake_after
     }
 
     pub(crate) fn cursor(&self) -> winit::window::CursorIcon {

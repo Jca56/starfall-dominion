@@ -1,9 +1,12 @@
 mod actions;
 mod app;
 mod camera;
+mod fleet;
 mod gpu;
 mod interface;
+mod layout;
 mod map;
+mod planets;
 mod sector;
 mod world;
 

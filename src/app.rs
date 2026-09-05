@@ -18,6 +18,8 @@ pub(crate) struct App {
     window: Option<Arc<Window>>,
     error: Option<Box<dyn std::error::Error>>,
     retry_at: Option<Instant>,
+    /// When an animation asked for its next frame; vsync paces continuous motion.
+    wake_at: Option<Instant>,
     surface_failures: u8,
     presented: bool,
     interface: Interface,
@@ -77,6 +79,15 @@ impl App {
                     eprintln!("Main menu presented with Lantern UI 2. F11: fullscreen · Esc: back");
                     self.presented = true;
                 }
+                // Motion keeps frames coming; an idle screen sleeps until input.
+                self.wake_at = match self.interface.wake_after() {
+                    Some(delay) if delay <= 0.002 => {
+                        window.request_redraw();
+                        None
+                    }
+                    Some(delay) => Some(Instant::now() + Duration::from_secs_f64(delay)),
+                    None => None,
+                };
             }
             Err(wgpu::SurfaceError::OutOfMemory) => {
                 self.fail(
@@ -101,6 +112,13 @@ impl App {
             }
         }
     }
+
+    fn deadline(&self) -> Option<Instant> {
+        match (self.retry_at, self.wake_at) {
+            (Some(retry), Some(wake)) => Some(retry.min(wake)),
+            (retry, wake) => retry.or(wake),
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -116,6 +134,7 @@ impl ApplicationHandler for App {
         self.renderer = None;
         self.window = None;
         self.retry_at = None;
+        self.wake_at = None;
         self.surface_failures = 0;
         self.presented = false;
     }
@@ -152,17 +171,18 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(deadline) = self.retry_at {
+        if let Some(deadline) = self.deadline() {
             if Instant::now() < deadline {
                 event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
                 return;
             }
             self.retry_at = None;
+            self.wake_at = None;
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
         }
-        // A still backdrop only needs another frame after a window event.
+        // Nothing is moving: sleep until the next window event.
         event_loop.set_control_flow(ControlFlow::Wait);
     }
 }

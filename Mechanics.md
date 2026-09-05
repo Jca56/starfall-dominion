@@ -4,6 +4,17 @@ Collect and manage resources, build armies to defend and secure new planets.
 ## Turn Based Strategy
 - Do things on your turn, end turn, enemy does things, your turn again!
 
+## Win Conditions
+- Liberation - Pushed back the Starfall Dominion.
+        Conditions
+                - Secure the Dominion home planet
+                - The Dominion do not own any other planets
+- Technological Supremacy (Concept not locked in)
+        Conditions:
+                - Research the "Multidimensional Travel" technology
+                - Build the "Dimension Portal" building
+                - Survive until the Dimension Portal is fully charged
+                - Hop to a safe alternate dimension or send the Dominion to another dimension 
 ## The Map
 - Player starts on the far left/West of the map. Enemy AI starts on the far right/East.
 - Divided into sectors.

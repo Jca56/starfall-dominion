@@ -1,84 +1,58 @@
 use crate::actions::{self, Action};
+use crate::camera::View;
+use crate::fleet::Travel;
+use crate::layout;
+use crate::planets::PLANETS;
 use crate::world::{Game, Side};
 use lntrn_math::{Color, Rect, Vec2};
 use lntrn_ui::Ui;
 
 use crate::interface::{panel_background, region};
 
-pub(crate) struct Planet {
-    pub(crate) name: &'static str,
-    pub(crate) position: Vec2,
-    pub(crate) color: Color,
-    pub(crate) occupied: bool,
-    description: &'static str,
-}
-
-// Provisional names and positions for exploring the interface, not simulation data.
-pub(crate) const PLANETS: [Planet; 5] = [
-    Planet {
-        name: "Farlight",
-        position: Vec2::new(190.0, 320.0),
-        color: Color::hex(0x72C5EE),
-        occupied: false,
-        description: "A temperate world at the heart of the Expanse.",
-    },
-    Planet {
-        name: "Haven",
-        position: Vec2::new(350.0, 140.0),
-        color: Color::hex(0x82D5AA),
-        occupied: false,
-        description: "A peaceful ocean world beneath wide, open skies.",
-    },
-    Planet {
-        name: "Verdant",
-        position: Vec2::new(500.0, 530.0),
-        color: Color::hex(0xB7CE85),
-        occupied: false,
-        description: "A fertile world on the edge of the free planets.",
-    },
-    Planet {
-        name: "Cinder",
-        position: Vec2::new(740.0, 290.0),
-        color: Color::hex(0xECAC73),
-        occupied: true,
-        description: "An industrial world under Dominion occupation.",
-    },
-    Planet {
-        name: "Vesper",
-        position: Vec2::new(880.0, 520.0),
-        color: Color::hex(0xB496D7),
-        occupied: true,
-        description: "A distant world beyond the Dominion frontier.",
-    },
-];
+/// Logical heights of the title bar and the turn controls that frame the map.
+const TOP_BAR: f64 = 95.0;
+const BOTTOM_BAR: f64 = 110.0;
 
 pub(crate) struct Sector {
     pub(crate) selected: Option<usize>,
-    pub(crate) pan: Vec2,
-    pub(crate) zoom: f64,
+    pub(crate) view: View,
     pub(crate) game: Game,
     pub(crate) fleet_selected: bool,
+    /// The order being played out on screen, if any.
+    pub(crate) travel: Option<Travel>,
+    /// Radians; the ship's nose points along its last order.
+    pub(crate) heading: f64,
     pub(crate) message: Option<String>,
     pub(crate) move_requests: Vec<Vec2>,
 }
 
 impl Default for Sector {
     fn default() -> Self {
+        let game = Game::default();
         Self {
             selected: None,
-            pan: Vec2::ZERO,
-            zoom: 1.0,
-            game: Game::default(),
+            view: View::starting_at(game.fleets[0].position),
+            game,
             fleet_selected: false,
+            travel: None,
+            heading: 0.0,
             message: None,
             move_requests: Vec::new(),
         }
     }
 }
 
+/// The map between the title bar and the turn controls, in physical pixels.
+pub(crate) fn map_region(bounds: Rect, scale: f64) -> Rect {
+    Rect::new(
+        Vec2::new(0.0, TOP_BAR * scale),
+        bounds.max - Vec2::new(0.0, BOTTOM_BAR * scale),
+    )
+}
+
 pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
     let scale = ui.m.scale;
-    let bar = Rect::from_xywh(0.0, 0.0, bounds.width(), 95.0 * scale);
+    let bar = Rect::from_xywh(0.0, 0.0, bounds.width(), TOP_BAR * scale);
     ui.fill_square(bar, Color::hex(0x101925));
     ui.hline(bar.max.y, 0.0, bounds.max.x, Color::hex(0x43546E));
     let title = Rect::from_xywh(
@@ -103,15 +77,12 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
             menu = ui.button_wide("Menu").clicked;
         },
     );
-    let map = Rect::new(
-        Vec2::new(0.0, bar.max.y),
-        bounds.max - Vec2::new(0.0, 110.0 * scale),
-    );
+    let map = map_region(bounds, scale);
     let details = Rect::from_xywh(
         bounds.max.x - 380.0 * scale,
         bar.max.y + 25.0 * scale,
         355.0 * scale,
-        420.0 * scale,
+        480.0 * scale,
     );
     let visible = if sector.selected.is_some() {
         Rect::new(map.min, Vec2::new(details.min.x - 15.0 * scale, map.max.y))
@@ -131,6 +102,9 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
             } else {
                 "Free world"
             });
+            if let Some(region) = layout::region_of(planet.position) {
+                ui.label_dim(&format!("Sector {}", region.name));
+            }
             ui.space(15.0 * scale);
             ui.paragraph(planet.description);
             ui.space(20.0 * scale);
@@ -143,7 +117,7 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
     if sector.fleet_selected {
         let fleet = &sector.game.fleets[0];
         let label = format!(
-            "Movement: {:.1} / {:.0} units",
+            "Movement: {:.0} / {:.0} units",
             fleet.remaining, fleet.speed
         );
         let text_rect = Rect::from_xywh(
