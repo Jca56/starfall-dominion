@@ -1,5 +1,7 @@
 use super::*;
 use crate::camera::{Camera, ZoomRange};
+use crate::economy::Resources;
+use crate::world::Side;
 use crate::world::{SCOUT_SPEED, SCOUT_VISION, WORLD_SIZE};
 use lntrn_ui::{MouseButton, WheelDelta};
 
@@ -20,6 +22,17 @@ fn setup(scale: f64) -> Interface {
 
 fn widget(ui: &Interface, region: &str, name: &str) -> Rect {
     ui.state.rects[&WidgetId::ROOT.with(region).with(name)]
+}
+
+fn tab(ui: &Interface, region: &str, label: &str, index: usize) -> Rect {
+    ui.state.rects[&WidgetId::ROOT.with(region).with(label).with_index(index)]
+}
+
+fn planet(name: &str) -> &'static crate::planets::Planet {
+    crate::planets::PLANETS
+        .iter()
+        .find(|planet| planet.name == name)
+        .expect("a named planet")
 }
 
 fn map_region(scale: f64) -> Rect {
@@ -205,7 +218,7 @@ fn fleet_orders_glide_and_end_turn_work_through_the_ui_at_both_scales() {
         click(&mut ui, start.center(), scale);
         let ship = widget(&ui, "sector-map", "Farlight Scout");
         click(&mut ui, ship.center(), scale);
-        assert!(ui.sector.fleet_selected);
+        assert!(ui.sector.selected_fleet.is_some());
         let view = &ui.sector.view;
         let camera = Camera::new(map_region(scale), scale, view.center, view.zoom);
         let origin = ui.sector.game.fleets[0].position;
@@ -224,10 +237,7 @@ fn fleet_orders_glide_and_end_turn_work_through_the_ui_at_both_scales() {
         frame(&mut ui, scale);
         assert!((ui.sector.game.fleets[0].position - destination).length() < 1e-8);
         assert!((ui.sector.game.fleets[0].remaining - (SCOUT_SPEED - 30.0)).abs() < 1e-8);
-        assert!(
-            ui.sector.travel.is_some(),
-            "A committed order glides on screen"
-        );
+        assert!(ui.sector.any_travel(), "A committed order glides on screen");
         assert!(ui.wake_after().is_some(), "The glide keeps frames coming");
         let far = camera.to_screen(destination + Vec2::new(SCOUT_SPEED, 0.0));
         right_click(&mut ui, far);
@@ -245,7 +255,7 @@ fn fleet_orders_glide_and_end_turn_work_through_the_ui_at_both_scales() {
         // Once the glide lands the loop goes back to sleep.
         ui.events.push(Event::PointerMoved(point));
         let_motion_finish(&mut ui, scale);
-        assert!(ui.sector.travel.is_none());
+        assert!(!ui.sector.any_travel());
         assert!(ui.wake_after().is_none(), "Nothing moving means no frames");
     }
 }
@@ -274,7 +284,7 @@ fn right_clicking_ui_or_deselected_map_does_not_move_a_fleet() {
         mods: Modifiers::NONE,
     });
     frame(&mut ui, 1.0);
-    assert!(!ui.sector.fleet_selected);
+    assert!(ui.sector.selected_fleet.is_none());
     assert_eq!(ui.screen, Screen::Sector);
 }
 
@@ -392,4 +402,84 @@ fn the_chart_reveals_as_the_ship_glides_and_catches_up_when_it_lands() {
         ui.wake_after().is_none(),
         "A landed ship stops asking for frames"
     );
+}
+
+#[test]
+fn the_home_world_shipyard_builds_a_scout_when_you_can_afford_it() {
+    let mut ui = setup(1.0);
+    let start = widget(&ui, "main-menu", "Start Game");
+    click(&mut ui, start.center(), 1.0);
+    let zoom = ui.sector.view.zoom;
+    ui.sector.view.snap(planet("Arcadia").position, zoom);
+    frame(&mut ui, 1.0);
+    let arcadia = widget(&ui, "sector-map", "Arcadia");
+    click(&mut ui, arcadia.center(), 1.0);
+    let shipyard = tab(&ui, "planet-details", "Shipyard", 1);
+    click(&mut ui, shipyard.center(), 1.0);
+    let build = widget(&ui, "planet-details", "Build Scout");
+    click(&mut ui, build.center(), 1.0);
+    assert_eq!(ui.sector.message.as_deref(), Some("Not enough resources."));
+    assert!(ui.sector.game.shipyard.is_none());
+    ui.sector.game.stockpile = Resources::new(10, 5);
+    frame(&mut ui, 1.0);
+    let build = widget(&ui, "planet-details", "Build Scout");
+    click(&mut ui, build.center(), 1.0);
+    assert!(ui.sector.game.shipyard.is_some());
+    assert!(ui.sector.game.stockpile.is_empty());
+    let close = widget(&ui, "planet-details", "Close");
+    click(&mut ui, close.center(), 1.0);
+    let end = widget(&ui, "turn-controls", "End Turn");
+    click(&mut ui, end.center(), 1.0);
+    click(&mut ui, end.center(), 1.0);
+    assert_eq!(
+        ui.sector.game.fleets.len(),
+        2,
+        "Two turns later the scout launches"
+    );
+    assert_eq!(ui.sector.game.fleets[1].name, "Scout 2");
+    let pay = planet("Arcadia").yield_per_turn;
+    assert_eq!(
+        ui.sector.game.stockpile,
+        pay.plus(pay),
+        "Arcadia paid out twice meanwhile"
+    );
+}
+
+#[test]
+fn securing_a_planet_from_the_popup_takes_turns_in_range() {
+    let mut ui = setup(1.0);
+    let start = widget(&ui, "main-menu", "Start Game");
+    click(&mut ui, start.center(), 1.0);
+    let ship = widget(&ui, "sector-map", "Farlight Scout");
+    click(&mut ui, ship.center(), 1.0);
+    let origin = ui.sector.game.fleets[0].position;
+    let target = planet("L2-b");
+    let toward = target.position - origin;
+    // Short of a full move so the target point stays inside the small test window.
+    let stop = origin + toward / toward.length() * (SCOUT_SPEED - 20.0);
+    let view = &ui.sector.view;
+    let camera = Camera::new(map_region(1.0), 1.0, view.center, view.zoom);
+    let point = camera.to_screen(stop);
+    right_click(&mut ui, point);
+    frame(&mut ui, 1.0);
+    let_motion_finish(&mut ui, 1.0);
+    assert!(
+        ui.sector.game.fog.explored_at(target.position),
+        "Now in sight"
+    );
+    let zoom = ui.sector.view.zoom;
+    ui.sector.view.snap(target.position, zoom);
+    frame(&mut ui, 1.0);
+    let marker = widget(&ui, "sector-map", "L2-b");
+    click(&mut ui, marker.center(), 1.0);
+    let secure = widget(&ui, "planet-details", "Secure Planet");
+    click(&mut ui, secure.center(), 1.0);
+    assert!(ui.sector.game.planets[3].securing);
+    let close = widget(&ui, "planet-details", "Close");
+    click(&mut ui, close.center(), 1.0);
+    let end = widget(&ui, "turn-controls", "End Turn");
+    for _ in 0..target.secure_turns {
+        click(&mut ui, end.center(), 1.0);
+    }
+    assert_eq!(ui.sector.game.planets[3].owner, Some(Side::Player));
 }

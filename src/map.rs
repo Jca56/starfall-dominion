@@ -1,3 +1,5 @@
+use std::f64::consts::{FRAC_PI_2, TAU};
+
 use lntrn_math::{Color, Rect, Vec2};
 use lntrn_ui::{CursorIcon, Sense, Ui};
 
@@ -14,7 +16,7 @@ const WHEEL_ZOOM: f64 = 0.003;
 /// shrink to dots and names hide, so the overview reads as space, not a board.
 const CHART_ZOOM: f64 = 0.3;
 const BORDER: Color = Color::hex(0x617A95);
-const PLAYER_COLOR: Color = Color::hex(0x8EDBE7);
+pub(crate) const PLAYER_COLOR: Color = Color::hex(0x8EDBE7);
 const DOMINION_COLOR: Color = Color::hex(0xF38F8F);
 const FREE_COLOR: Color = Color::hex(0xD9D2A6);
 /// A world charted from afar: position known, nothing else.
@@ -32,8 +34,10 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
     }
     let camera = Camera::new(region, scale, sector.view.center, sector.view.zoom);
     for point in std::mem::take(&mut sector.move_requests) {
-        if sector.fleet_selected && ui.clip().contains(point) {
-            fleet::order(sector, camera.to_world(point), now);
+        if let Some(id) = sector.selected_fleet
+            && ui.clip().contains(point)
+        {
+            fleet::order(sector, id, camera.to_world(point), now);
         }
     }
     // Orders commit first so a fresh glide charts its start and asks for frames.
@@ -42,7 +46,9 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
     }
 
     boundaries(ui, &camera);
-    let ship_hit = fleet::hit_rect(&camera, sector, now, scale);
+    let hits = fleet::hit_rects(&camera, sector, now, scale);
+    // A ship parked over a planet takes pointer selection priority.
+    let on_ship = hits.iter().any(|(_, hit)| hit.contains(ui.state.press_pos));
     // Planets swell a little as the camera closes in, but never scale one-to-one;
     // pulled far back they become chart dots.
     let relative = sector.view.zoom / ZoomRange::for_region(region, scale).start;
@@ -59,12 +65,7 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
             Vec2::new(150.0 * scale, 110.0 * scale),
         );
         let id = ui.id(planet.name);
-        // A ship parked over a planet takes pointer selection priority.
-        let sense = if ship_hit.contains(ui.state.press_pos) {
-            Sense::NONE
-        } else {
-            Sense::CLICK
-        };
+        let sense = if on_ship { Sense::NONE } else { Sense::CLICK };
         let mut response = ui.interact(id, hit, sense);
         if !hit.intersection(&ui.clip()).is_empty() {
             ui.focusable(id, hit);
@@ -72,7 +73,8 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
         }
         if response.clicked {
             sector.selected = Some(index);
-            sector.fleet_selected = false;
+            sector.details_tab = 0;
+            sector.selected_fleet = None;
             sector.message = None;
             ui.state.request_rebuild = true;
         }
@@ -84,6 +86,7 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
         } else {
             0.45
         };
+        let state = sector.game.planets[index].clone();
         let explored = sector.chart.explored_at(planet.position);
         // Surveyed worlds show what is there; in view they are lit, remembered they dim.
         let lit = if !explored {
@@ -97,7 +100,7 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
             0.55
         };
         if explored {
-            let allegiance = allegiance(planet.owner).fade(lit);
+            let allegiance = allegiance(state.owner).fade(lit);
             ui.draw
                 .circle(point, radius + halo * 1.5, allegiance.fade(0.07));
             ui.draw
@@ -108,6 +111,19 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
                 planet.color.fade(lit),
                 planet.color.scale_rgb(0.2).fade(lit),
             );
+            if state.securing {
+                // Influence builds clockwise from the top until the world is secured.
+                let sweep =
+                    TAU * f64::from(state.influence) / f64::from(planet.secure_turns.max(1));
+                ui.draw.arc(
+                    point,
+                    radius + halo + 6.0 * scale,
+                    -FRAC_PI_2,
+                    -FRAC_PI_2 + sweep.max(0.08),
+                    3.0 * scale,
+                    PLAYER_COLOR.fade(0.9),
+                );
+            }
         } else {
             // Charted from afar: the locals know where it is, not what is there.
             ui.draw
@@ -127,7 +143,7 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
         ui.focus_ring(id, hit);
     }
 
-    fleet::draw(ui, &camera, ship_hit, sector, chart);
+    fleet::draw_all(ui, &camera, sector, chart, &hits);
     let response = ui.interact(ui.id("pan"), ui.clip(), Sense::DRAG);
     if response.dragging {
         sector.view.pan_by(response.drag_delta, scale);

@@ -1,5 +1,6 @@
 use lntrn_math::Vec2;
 
+use crate::economy::{Build, PlanetState, Resources};
 use crate::fog::Fog;
 use crate::planets::PLANETS;
 
@@ -18,10 +19,20 @@ pub(crate) enum Side {
     Dominion,
 }
 
+impl Side {
+    /// The faction name as the player sees it.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Player => "Farlight",
+            Self::Dominion => "Starfall",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Fleet {
     pub(crate) id: u32,
-    pub(crate) name: &'static str,
+    pub(crate) name: String,
     pub(crate) owner: Side,
     pub(crate) position: Vec2,
     pub(crate) speed: f64,
@@ -37,6 +48,13 @@ pub(crate) struct Game {
     pub(crate) fleets: Vec<Fleet>,
     /// The player's chart. The Dominion has no fog of its own yet.
     pub(crate) fog: Fog,
+    /// One entry per planet in `PLANETS`.
+    pub(crate) planets: Vec<PlanetState>,
+    pub(crate) stockpile: Resources,
+    /// The ship under construction at the home world.
+    pub(crate) shipyard: Option<Build>,
+    /// Ids for ships launched during play; the first scout is 0.
+    pub(crate) next_fleet_id: u32,
 }
 
 impl Game {
@@ -59,8 +77,9 @@ impl Game {
             .chain(
                 PLANETS
                     .iter()
-                    .filter(|planet| planet.owner == Some(side))
-                    .map(|planet| (planet.position, PLANET_VISION)),
+                    .zip(&self.planets)
+                    .filter(|(_, state)| state.owner == Some(side))
+                    .map(|(planet, _)| (planet.position, PLANET_VISION)),
             )
             .collect()
     }
@@ -80,7 +99,7 @@ impl Default for Game {
             active_side: Side::Player,
             fleets: vec![Fleet {
                 id: 0,
-                name: "Farlight Scout",
+                name: "Farlight Scout".to_string(),
                 owner: Side::Player,
                 position: Vec2::new(300.0, 1000.0),
                 speed: SCOUT_SPEED,
@@ -88,6 +107,17 @@ impl Default for Game {
                 vision: SCOUT_VISION,
             }],
             fog: Fog::new(),
+            planets: PLANETS
+                .iter()
+                .map(|planet| PlanetState {
+                    owner: planet.owner,
+                    influence: 0,
+                    securing: false,
+                })
+                .collect(),
+            stockpile: Resources::default(),
+            shipyard: None,
+            next_fleet_id: 1,
         };
         // You start knowing only what your home and your scout can see.
         for (center, radius) in game.vision_sources(Side::Player) {

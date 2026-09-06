@@ -91,9 +91,9 @@ impl Interface {
                 .is_some()
                 && self.screen == Screen::Sector
             {
-                if self.sector.fleet_selected {
-                    self.sector.fleet_selected = false;
-                } else if self.sector.selected.take().is_none() {
+                if self.sector.selected_fleet.take().is_none()
+                    && self.sector.selected.take().is_none()
+                {
                     self.screen = Screen::MainMenu;
                 }
                 self.sector.message = None;

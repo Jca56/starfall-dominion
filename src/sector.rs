@@ -1,22 +1,27 @@
 use crate::actions::{self, Action};
-use crate::camera::View;
-use crate::fleet::{self, Travel};
+use crate::camera::{Camera, View};
+use crate::details;
+use crate::economy::Resource;
+use crate::fleet::{self, ShipVisual};
 use crate::fog::Fog;
-use crate::layout;
-use crate::planets::PLANETS;
 use crate::world::{Game, Side};
 use lntrn_math::{Color, Rect, Vec2};
 use lntrn_ui::{Response, Sense, Ui, WidgetId};
 
-use crate::interface::{panel_background, region};
+use crate::interface::region;
 
-/// Logical height of the slim bar across the top that holds the menu button.
+/// Logical height of the Command Strip across the top: resources and the menu.
 const TOP_BAR: f64 = 75.0;
 /// Logical diameter of the round End Turn button in the bottom-right corner.
 const END_TURN_SIZE: f64 = 150.0;
+const ALLOY_COLOR: Color = Color::hex(0xC9B79C);
+const ELECTRONICS_COLOR: Color = Color::hex(0x8EDBE7);
 
 pub(crate) struct Sector {
+    /// The planet whose details popup is open.
     pub(crate) selected: Option<usize>,
+    /// Which tab of the popup is showing: 0 Overview, 1 Shipyard.
+    pub(crate) details_tab: usize,
     pub(crate) view: View,
     pub(crate) game: Game,
     /// The fog as drawn. It trails the rules while a ship glides so the reveal
@@ -24,11 +29,9 @@ pub(crate) struct Sector {
     pub(crate) chart: Fog,
     /// The rules' fog version the chart last copied.
     pub(crate) synced: u64,
-    pub(crate) fleet_selected: bool,
-    /// The order being played out on screen, if any.
-    pub(crate) travel: Option<Travel>,
-    /// Radians; the ship's nose points along its last order.
-    pub(crate) heading: f64,
+    pub(crate) selected_fleet: Option<u32>,
+    /// Headings and glides, one per ship the screen has drawn.
+    pub(crate) ships: Vec<ShipVisual>,
     pub(crate) message: Option<String>,
     pub(crate) move_requests: Vec<Vec2>,
 }
@@ -38,13 +41,13 @@ impl Default for Sector {
         let game = Game::default();
         Self {
             selected: None,
+            details_tab: 0,
             view: View::starting_at(game.fleets[0].position),
             chart: game.fog.clone(),
             synced: game.fog.version(),
             game,
-            fleet_selected: false,
-            travel: None,
-            heading: 0.0,
+            selected_fleet: None,
+            ships: Vec::new(),
             message: None,
             move_requests: Vec::new(),
         }
@@ -55,15 +58,19 @@ impl Sector {
     /// What lights the map on screen: the rules' view, except a gliding ship
     /// shines from where it is drawn.
     pub(crate) fn shown_vision_sources(&self, now: f64) -> Vec<(Vec2, f64)> {
-        let shown = fleet::shown_position(self, now);
         self.game.vision_sources_shown(Side::Player, |fleet| {
-            if fleet.id == 0 { shown } else { fleet.position }
+            fleet::shown_position(self, fleet, now)
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn any_travel(&self) -> bool {
+        self.ships.iter().any(|ship| ship.travel.is_some())
     }
 }
 
-/// The map below the top bar, in physical pixels. It runs to the bottom edge;
-/// the turn controls float over it.
+/// The map below the Command Strip, in physical pixels. It runs to the bottom
+/// edge; the turn controls float over it.
 pub(crate) fn map_region(bounds: Rect, scale: f64) -> Rect {
     Rect::new(Vec2::new(0.0, TOP_BAR * scale), bounds.max)
 }
@@ -73,6 +80,7 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
     let bar = Rect::from_xywh(0.0, 0.0, bounds.width(), TOP_BAR * scale);
     ui.fill_square(bar, Color::hex(0x05070C));
     ui.hline(bar.max.y, 0.0, bounds.max.x, Color::hex(0x1E2633));
+    tracker(ui, sector, bar);
     let mut menu = false;
     region(
         ui,
@@ -95,53 +103,21 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
         Vec2::splat(END_TURN_SIZE * scale),
     );
     let (end_turn_id, end_turn_response) = end_turn_interact(ui, end_turn);
-    // A right-click on the button is not an order for the map underneath.
-    sector
-        .move_requests
-        .retain(|point| !end_turn.contains(*point));
 
     let map = map_region(bounds, scale);
-    let details = Rect::from_xywh(
-        bounds.max.x - 380.0 * scale,
-        bar.max.y + 25.0 * scale,
-        355.0 * scale,
-        480.0 * scale,
-    );
-    let visible = if sector.selected.is_some() {
-        Rect::new(map.min, Vec2::new(details.min.x - 15.0 * scale, map.max.y))
-    } else {
-        map
-    };
-    region(ui, visible, "sector-map", |ui| {
+    let camera = Camera::new(map, scale, sector.view.center, sector.view.zoom);
+    let popup = sector
+        .selected
+        .map(|index| details::rect(map, &camera, index, scale));
+    // Right-clicks on floating panels are not orders for the map underneath.
+    sector.move_requests.retain(|point| {
+        !end_turn.contains(*point) && !popup.is_some_and(|rect| rect.contains(*point))
+    });
+    region(ui, map, "sector-map", |ui| {
         crate::map::draw(ui, map, sector)
     });
-    if let Some(index) = sector.selected {
-        let planet = &PLANETS[index];
-        panel_background(ui, details);
-        region(ui, details.shrink(25.0 * scale), "planet-details", |ui| {
-            ui.heading(planet.name);
-            let explored = sector.chart.explored_at(planet.position);
-            ui.label_dim(match (explored, planet.owner) {
-                (false, _) => "Uncharted",
-                (true, Some(Side::Player)) => "Your world",
-                (true, Some(Side::Dominion)) => "Dominion occupied",
-                (true, None) => "Free world",
-            });
-            if let Some(region) = layout::region_of(planet.position) {
-                ui.label_dim(&format!("Sector {}", region.name));
-            }
-            ui.space(15.0 * scale);
-            ui.paragraph(if explored {
-                planet.description
-            } else {
-                "Charted from afar. Send a ship to survey it."
-            });
-            ui.space(20.0 * scale);
-            if ui.button_wide("Close").clicked {
-                sector.selected = None;
-                ui.state.request_rebuild = true;
-            }
-        });
+    if let (Some(index), Some(rect)) = (sector.selected, popup) {
+        details::draw(ui, rect, sector, index);
     }
     end_turn_draw(ui, end_turn, end_turn_id, &end_turn_response, sector);
     if let Some(message) = &sector.message {
@@ -154,6 +130,51 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
         ui.text_in_rect(message, &ui.text_style(), rect, Color::hex(0xF3BB8F));
     }
     menu
+}
+
+/// Stockpiles on the Command Strip, each with what arrives when the turn ends.
+fn tracker(ui: &mut Ui, sector: &Sector, bar: Rect) {
+    let scale = ui.m.scale;
+    let income = sector.game.income();
+    let style = ui.text_style();
+    let mut x = 30.0 * scale;
+    for resource in Resource::ALL {
+        let glyph = Vec2::new(x + 14.0 * scale, bar.center().y);
+        match resource {
+            Resource::Alloys => {
+                let corners: Vec<Vec2> = (0..6)
+                    .map(|i| {
+                        glyph
+                            + Vec2::from_angle(f64::from(i) * std::f64::consts::FRAC_PI_3)
+                                * 13.0
+                                * scale
+                    })
+                    .collect();
+                ui.draw.polyline(&corners, 2.5 * scale, ALLOY_COLOR, true);
+            }
+            Resource::Electronics => {
+                let chip = Rect::from_center_size(glyph, Vec2::splat(22.0 * scale));
+                ui.draw
+                    .stroke_rect(chip, 2.5 * scale, 3.0 * scale, ELECTRONICS_COLOR);
+                ui.draw.circle(glyph, 3.5 * scale, ELECTRONICS_COLOR);
+            }
+        }
+        let text = format!(
+            "{} {} (+{})",
+            resource.name(),
+            sector.game.stockpile.get(resource),
+            income.get(resource)
+        );
+        let width = ui.measure(&text, &style);
+        let rect = Rect::from_xywh(
+            x + 38.0 * scale,
+            bar.min.y,
+            width + 10.0 * scale,
+            bar.height(),
+        );
+        ui.text_in_rect(&text, &style, rect, ui.theme.text);
+        x += 38.0 * scale + width + 50.0 * scale;
+    }
 }
 
 /// Claim input for the End Turn button before the map is drawn.

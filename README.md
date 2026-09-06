@@ -15,7 +15,9 @@ The initial window requests 1280 × 800 logical pixels, with a minimum of
 the display scale from the compositor; the renderer uses physical surface sizes.
 
 - **Start Game:** enter the rough sector map, looking at the home region.
-- **Click a planet:** open its information panel.
+- **Click a planet:** open its details popup above it: who holds it, its sector,
+  turns to secure and decay, what it pays per turn, and a Secure Planet button
+  when it isn't yours. Arcadia's popup has a Shipyard tab.
 - **Left-click the scout:** select it and preview movement toward the cursor.
 - **Right-click the map:** commit the previewed move, capped at remaining range.
   The scout glides to its destination; the rules resolve the move instantly.
@@ -59,6 +61,24 @@ Resizing the window reveals more or less space without rescaling distances.
 The starfield is drawn in screen space as parallax layers. They drift as the
 map pans, at a fraction of its speed, and only gently rescale with zoom, so
 zooming out never turns them into noise. Menus and HUD stay anchored to the window.
+
+## The first gameplay loop
+
+Secure, earn, build. A ship that holds within 200 units of a planet you don't
+own can start a securing effort from the planet's popup. Each End Turn with a
+ship still in range and no enemy in range adds a turn of influence; the planet
+is yours once that reaches its secure count (3 to 5). With no ship in range the
+influence decays (1 or 2 a turn) and the effort ends when it hits zero. A
+securing planet shows its progress as an arc on the map.
+
+Every planet you hold pays its yield of Alloys and Advanced Electronics when
+you end your turn, unless an enemy ship sits within 200 units, in which case it
+pays nothing that turn. The Command Strip at the top shows each stockpile with
+what arrives next turn in parentheses. Arcadia's Shipyard tab builds a Scout for
+10 Alloys and 5 Electronics, paid up front; it launches beside Arcadia two turns
+later with full movement. All of these numbers are placeholders in
+`src/planets.rs` and `src/economy.rs`. The rules live in the Action Registry so
+previews, buttons, and the future AI share one set of checks.
 
 ## Fog of war
 

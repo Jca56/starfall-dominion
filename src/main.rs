@@ -1,6 +1,8 @@
 mod actions;
 mod app;
 mod camera;
+mod details;
+mod economy;
 mod fleet;
 mod fog;
 mod gpu;

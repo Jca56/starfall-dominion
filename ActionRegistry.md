@@ -22,12 +22,38 @@ This is an initial catalog, not a completed AI planner or action history.
 - **Current resolution:** instantaneous, with no cancellation or interruption.
   Animation and fog reveal are future work; uninterrupted orders are provisional.
 
+## Secure Planet
+
+- **Input:** a planet index.
+- **Available when:** it is the acting side's turn, the planet is not already
+  theirs, no securing effort is under way there, one of their ships is within
+  200 units, and no enemy ship is within 200 units.
+- **Commit:** mark a securing effort. Progress happens at End Turn (below).
+- **Warnings:** unknown planet, already yours, already securing, no ship in
+  range, enemy in range.
+
+## Build Ship
+
+- **Input:** a ship kind. Only the Scout exists: 10 Alloys, 5 Advanced
+  Electronics, 2 turns.
+- **Available when:** it is the player's turn (only Farlight has a shipyard),
+  the shipyard is idle, and the stockpile covers the cost.
+- **Commit:** pay the cost now and start the build. The ship launches beside the
+  home world when the build finishes, with full movement on its first turn.
+- **Warnings:** no shipyard, shipyard busy, cannot afford.
+
 ## End Turn
 
 - **Input:** no parameters.
 - **Available when:** it is the acting side's turn. Spending all movement is not
   required; holding position is valid.
-- **Commit:** hand control to the other side and refresh that side's fleets to
+- **Commit:** when the player ends a turn, first resolve the economy in this
+  order: every securing effort gains a turn of influence if a Farlight ship is
+  within 200 units and no enemy is, and the planet becomes Farlight's at its
+  secure count; otherwise influence decays by the planet's rate and the effort
+  ends at zero. Then every Farlight planet without an enemy ship within 200
+  units pays its yield. Then the shipyard advances and launches a finished ship.
+  Finally hand control to the other side and refresh that side's fleets to
   their movement-speed budgets. Unspent movement does not accumulate.
 - **Counter:** starts at 1; advances after the Dominion finishes its turn.
 - **Current enemy behavior:** the Dominion immediately passes using End Turn.
