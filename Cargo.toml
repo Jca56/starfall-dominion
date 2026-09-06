@@ -12,6 +12,8 @@ lntrn-ui = { path = "../lantern-ui-2/crates/lntrn-ui" }
 lntrn-render = { path = "../lantern-ui-2/crates/lntrn-render" }
 lntrn-math = { path = "../lantern-ui-2/crates/lntrn-math" }
 lntrn-text = { path = "../lantern-ui-2/crates/lntrn-text" }
+lntrn-image = { path = "../lantern-ui-2/crates/lntrn-image" }
+lntrn-props = { path = "../lantern-ui-2/crates/lntrn-props" }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -1638,7 +1638,9 @@ name = "starfall-dominion"
 version = "0.1.0"
 dependencies = [
  "lntrn-app",
+ "lntrn-image",
  "lntrn-math",
+ "lntrn-props",
  "lntrn-render",
  "lntrn-text",
  "lntrn-ui",

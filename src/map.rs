@@ -1,13 +1,15 @@
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use lntrn_math::{Color, Rect, Vec2};
-use lntrn_ui::{CursorIcon, Sense, Ui};
+use lntrn_ui::{Sense, Ui};
 
 use crate::camera::{Camera, ZoomRange};
+use crate::economy::SECURE_RANGE;
 use crate::fleet;
 use crate::layout;
 use crate::planets::PLANETS;
 use crate::sector::Sector;
+use crate::theme;
 use crate::world::{Side, WORLD_SIZE};
 
 /// Zoom per wheel pixel; one notch is about 1.2×.
@@ -15,13 +17,10 @@ const WHEEL_ZOOM: f64 = 0.003;
 /// Below this fraction of the starting zoom the map becomes a star chart: planets
 /// shrink to dots and names hide, so the overview reads as space, not a board.
 const CHART_ZOOM: f64 = 0.3;
-const BORDER: Color = Color::hex(0x617A95);
-pub(crate) const PLAYER_COLOR: Color = Color::hex(0x8EDBE7);
-const DOMINION_COLOR: Color = Color::hex(0xF38F8F);
-const FREE_COLOR: Color = Color::hex(0xD9D2A6);
-/// A world charted from afar: position known, nothing else.
-const CHARTED: Color = Color::hex(0x8A9BB3);
 
+/// Mouse on the map: left selects a ship, then left again sends it; left on a
+/// planet opens it, or sends the selected ship toward it; a right drag pans and
+/// a plain right click deselects (handled in the interface).
 pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
     let scale = ui.m.scale;
     let now = ui.now();
@@ -29,18 +28,16 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
         let factor = (ui.state.wheel.y * WHEEL_ZOOM).exp();
         sector.view.zoom_by(factor, ui.state.pointer, region, scale);
     }
+    if let Some(press) = sector.right_press
+        && ui.clip().contains(press)
+        && ui.state.delta != Vec2::ZERO
+    {
+        sector.view.pan_by(ui.state.delta, scale);
+    }
     if sector.view.step(now, region, scale) {
         ui.state.request_redraw_after(0.0);
     }
     let camera = Camera::new(region, scale, sector.view.center, sector.view.zoom);
-    for point in std::mem::take(&mut sector.move_requests) {
-        if let Some(id) = sector.selected_fleet
-            && ui.clip().contains(point)
-        {
-            fleet::order(sector, id, camera.to_world(point), now);
-        }
-    }
-    // Orders commit first so a fresh glide charts its start and asks for frames.
     if fleet::advance(sector, now) {
         ui.state.request_redraw_after(0.0);
     }
@@ -72,20 +69,30 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
             ui.key_click(id, &mut response);
         }
         if response.clicked {
-            sector.selected = Some(index);
-            sector.details_tab = 0;
-            sector.selected_fleet = None;
-            sector.message = None;
+            if let Some(fleet_id) = sector.selected_fleet {
+                // With a ship selected, a planet is a destination, not a page.
+                fleet::order(sector, fleet_id, planet.position, now);
+            } else {
+                sector.selected = Some(index);
+                sector.details_tab = 0;
+                sector.message = None;
+            }
             ui.state.request_rebuild = true;
-        }
-        if response.hovered {
-            ui.state.cursor_icon = CursorIcon::Pointer;
         }
         let focus = if sector.selected == Some(index) || response.hovered {
             1.0
         } else {
             0.45
         };
+        if sector.selected == Some(index) {
+            // How close a ship must hold to secure it, or an enemy to contest it.
+            ui.draw.ring(
+                point,
+                SECURE_RANGE * camera.pixels_per_unit,
+                1.5 * scale,
+                theme::SECURE.fade(0.35),
+            );
+        }
         let state = sector.game.planets[index].clone();
         let explored = sector.chart.explored_at(planet.position);
         // Surveyed worlds show what is there; in view they are lit, remembered they dim.
@@ -121,13 +128,17 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
                     -FRAC_PI_2,
                     -FRAC_PI_2 + sweep.max(0.08),
                     3.0 * scale,
-                    PLAYER_COLOR.fade(0.9),
+                    theme::PLAYER.fade(0.9),
                 );
             }
         } else {
             // Charted from afar: the locals know where it is, not what is there.
-            ui.draw
-                .ring(point, radius * 0.75, line, CHARTED.fade(focus * 0.7 + 0.15));
+            ui.draw.ring(
+                point,
+                radius * 0.75,
+                line,
+                theme::CHARTED.fade(focus * 0.7 + 0.15),
+            );
         }
         if !chart {
             let label = Rect::from_center_size(
@@ -144,11 +155,13 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
     }
 
     fleet::draw_all(ui, &camera, sector, chart, &hits);
-    let response = ui.interact(ui.id("pan"), ui.clip(), Sense::DRAG);
-    if response.dragging {
-        sector.view.pan_by(response.drag_delta, scale);
-        ui.state.cursor_icon = CursorIcon::Grabbing;
-        if response.drag_delta != Vec2::ZERO {
+    // Empty space: a click closes an open panel, or sends the selected ship.
+    let response = ui.interact(ui.id("map"), ui.clip(), Sense::CLICK);
+    if response.clicked {
+        if sector.selected.take().is_some() {
+            ui.state.request_rebuild = true;
+        } else if let Some(fleet_id) = sector.selected_fleet {
+            fleet::order(sector, fleet_id, camera.to_world(ui.state.press_pos), now);
             ui.state.request_rebuild = true;
         }
     }
@@ -156,9 +169,9 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
 
 fn allegiance(owner: Option<Side>) -> Color {
     match owner {
-        Some(Side::Player) => PLAYER_COLOR,
-        Some(Side::Dominion) => DOMINION_COLOR,
-        None => FREE_COLOR,
+        Some(Side::Player) => theme::PLAYER,
+        Some(Side::Dominion) => theme::DOMINION,
+        None => theme::FREE,
     }
 }
 
@@ -170,12 +183,12 @@ fn boundaries(ui: &mut Ui, camera: &Camera) {
             camera.to_screen(a),
             camera.to_screen(b),
             ui.m.px(1.0),
-            BORDER.fade(0.5),
+            theme::SECTOR_LINE.fade(0.5),
         );
     }
     let bounds = Rect::new(camera.to_screen(Vec2::ZERO), camera.to_screen(WORLD_SIZE));
     ui.draw
-        .stroke_rect(bounds, ui.m.px(1.0), 0.0, BORDER.fade(0.8));
+        .stroke_rect(bounds, ui.m.px(1.0), 0.0, theme::SECTOR_LINE.fade(0.8));
     let style = ui.text_style();
     for region in &layout::REGIONS {
         let label = Rect::from_center_size(

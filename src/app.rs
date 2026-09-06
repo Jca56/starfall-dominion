@@ -6,9 +6,10 @@ use winit::dpi::LogicalSize;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Fullscreen, Window, WindowId};
+use winit::window::{CustomCursor, Fullscreen, Window, WindowId};
 
 use crate::AppResult;
+use crate::cursor;
 use crate::gpu::Renderer;
 use crate::interface::Interface;
 
@@ -23,6 +24,9 @@ pub(crate) struct App {
     surface_failures: u8,
     presented: bool,
     interface: Interface,
+    /// The prism pointer, rebuilt whenever the compositor scale changes.
+    cursor: Option<CustomCursor>,
+    prism: Option<lntrn_image::Image>,
 }
 
 impl App {
@@ -34,9 +38,12 @@ impl App {
         let attributes = Window::default_attributes()
             .with_title("Starfall Dominion")
             .with_decorations(false)
+            .with_fullscreen(Some(Fullscreen::Borderless(None)))
             .with_inner_size(LogicalSize::new(1280.0, 800.0))
             .with_min_inner_size(LogicalSize::new(900.0, 640.0));
         let window = Arc::new(event_loop.create_window(attributes)?);
+        self.prism = cursor::decode();
+        self.point(event_loop, &window, window.scale_factor());
         let renderer = Renderer::new(Arc::clone(&window), &self.interface.text)?;
         let size = window.inner_size();
         eprintln!(
@@ -49,6 +56,19 @@ impl App {
         self.renderer = Some(renderer);
         self.window = Some(window);
         Ok(())
+    }
+
+    /// Show the prism at the right size for `scale`, or fall back to the system arrow.
+    fn point(&mut self, event_loop: &ActiveEventLoop, window: &Window, scale: f64) {
+        self.cursor = self
+            .prism
+            .as_ref()
+            .and_then(|prism| cursor::source(prism, scale))
+            .map(|source| event_loop.create_custom_cursor(source));
+        match &self.cursor {
+            Some(cursor) => window.set_cursor(cursor.clone()),
+            None => eprintln!("Cursor image unavailable; using the system pointer"),
+        }
     }
 
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: impl Into<Box<dyn std::error::Error>>) {
@@ -67,7 +87,6 @@ impl App {
         }
         renderer.resize(size);
         self.interface.rebuild(size, window.scale_factor());
-        window.set_cursor(self.interface.cursor());
         if self.interface.needs_rebuild() {
             window.request_redraw();
         }
@@ -76,7 +95,7 @@ impl App {
                 self.retry_at = None;
                 self.surface_failures = 0;
                 if !self.presented {
-                    eprintln!("Main menu presented with Lantern UI 2. F11: fullscreen · Esc: back");
+                    eprintln!("Main menu presented with Lantern UI 2. F11: windowed · Esc: back");
                     self.presented = true;
                 }
                 // Motion keeps frames coming; an idle screen sleeps until input.
@@ -151,6 +170,8 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(_) => window.request_redraw(),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 eprintln!("Compositor scale changed to {scale_factor:.2}");
+                let window = Arc::clone(window);
+                self.point(event_loop, &window, scale_factor);
                 window.request_redraw();
             }
             WindowEvent::Occluded(false) => window.request_redraw(),

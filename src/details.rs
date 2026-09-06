@@ -1,43 +1,30 @@
-//! The planet details popup: anchored above the planet and drawn a layer up, so
-//! it floats over the map and takes its clicks first.
-use lntrn_math::{Rect, Vec2};
+//! The planet details panel: a card on the left of the map, in from the corner,
+//! with a portrait beside the name. It floats a layer up so it takes its clicks
+//! first; clicking anywhere outside it closes it.
+use lntrn_math::{Color, Rect, Vec2};
 use lntrn_ui::Ui;
 
 use crate::actions::{self, Action};
-use crate::camera::Camera;
 use crate::economy::{Resource, ShipKind};
+use crate::icons::Icon;
 use crate::interface::panel_background;
 use crate::layout;
 use crate::planets::PLANETS;
 use crate::sector::Sector;
+use crate::theme;
 use crate::world::Side;
 
-const WIDTH: f64 = 470.0;
-const HEIGHT: f64 = 500.0;
-/// The Shipyard tab strip adds a row on the home world.
-const TAB_ROW: f64 = 75.0;
-/// Space between the planet and the popup's edge.
-const GAP: f64 = 60.0;
+const WIDTH: f64 = 560.0;
+const HEIGHT: f64 = 720.0;
+/// In from the map's left edge and down from the Command Strip.
+const OFFSET: Vec2 = Vec2::new(120.0, 90.0);
+const PADDING: f64 = 25.0;
+const PORTRAIT: f64 = 130.0;
 
-/// Where the popup sits this frame: above the planet, or below when there is
-/// no room, and never off the sides of the map.
-pub(crate) fn rect(map: Rect, camera: &Camera, index: usize, scale: f64) -> Rect {
-    let planet = &PLANETS[index];
-    let point = camera.to_screen(planet.position);
-    let height = HEIGHT + if planet.home { TAB_ROW } else { 0.0 };
-    let size = Vec2::new(WIDTH, height) * scale;
-    let margin = 10.0 * scale;
-    let above = point.y - GAP * scale - size.y;
-    let y = if above >= map.min.y + margin {
-        above
-    } else {
-        point.y + GAP * scale
-    };
-    let x = (point.x - size.x * 0.5).clamp(
-        map.min.x + margin,
-        (map.max.x - margin - size.x).max(map.min.x + margin),
-    );
-    Rect::from_min_size(Vec2::new(x, y), size)
+pub(crate) fn rect(map: Rect, scale: f64) -> Rect {
+    let offset = OFFSET * scale;
+    let height = (HEIGHT * scale).min(map.height() - offset.y - 40.0 * scale);
+    Rect::from_min_size(map.min + offset, Vec2::new(WIDTH * scale, height))
 }
 
 pub(crate) fn draw(ui: &mut Ui, rect: Rect, sector: &mut Sector, index: usize) {
@@ -46,106 +33,150 @@ pub(crate) fn draw(ui: &mut Ui, rect: Rect, sector: &mut Sector, index: usize) {
     ui.state.keep_popup(rect, layer);
     let id = ui.id("planet-details");
     let window = ui.clip();
-    let mut child = Ui::new(
-        ui.draw,
-        ui.text,
-        ui.theme,
-        ui.m,
-        ui.state,
-        rect.shrink(25.0 * scale),
-        rect,
-        id,
-        layer,
+    let pad = PADDING * scale;
+    let portrait = Rect::from_min_size(rect.min + Vec2::splat(pad), Vec2::splat(PORTRAIT * scale));
+    let column = Rect::new(
+        Vec2::new(portrait.max.x + 20.0 * scale, rect.min.y + pad),
+        rect.max - Vec2::splat(pad),
     );
-    child.set_window_rect(window);
-    panel_background(&mut child, rect);
-    contents(&mut child, sector, index);
-    child.finish();
-    ui.draw.set_layer(ui.layer());
-}
+    let explored = sector.chart.explored_at(PLANETS[index].position);
 
-fn contents(ui: &mut Ui, sector: &mut Sector, index: usize) {
-    let planet = &PLANETS[index];
-    let scale = ui.m.scale;
-    ui.heading(planet.name);
-    let explored = sector.chart.explored_at(planet.position);
-    let owner = sector.game.planets[index].owner;
-    let sector_name = layout::region_of(planet.position).map_or("", |region| region.name);
-    let holder = match (explored, owner) {
+    // The column beside the portrait: name, security, the secure button, yields.
+    let mut header = Ui::new(
+        ui.draw, ui.text, ui.theme, ui.m, ui.state, column, rect, id, layer,
+    );
+    header.set_window_rect(window);
+    panel_background(&mut header, rect);
+    picture(&mut header, portrait, index, explored);
+    heading(&mut header, index, explored);
+    let reached = header.finish();
+
+    // Below both: who holds it, and the shipyard on the home world.
+    let body = Rect::new(
+        Vec2::new(rect.min.x + pad, reached.max(portrait.max.y) + 20.0 * scale),
+        rect.max - Vec2::splat(pad),
+    );
+    let mut body = Ui::new(
+        ui.draw, ui.text, ui.theme, ui.m, ui.state, body, rect, id, layer,
+    );
+    body.set_window_rect(window);
+    let holder = match (explored, sector.game.planets[index].owner) {
         (false, _) => "Uncharted",
         (true, Some(side)) => side.name(),
         (true, None) => "Unclaimed",
     };
-    ui.label_dim(&format!("{holder} · Sector {sector_name}"));
-    if !explored {
-        ui.space(15.0 * scale);
-        ui.paragraph("Charted from afar. Send a ship to see what is there.");
-    } else {
+    let sector_name = layout::region_of(PLANETS[index].position).map_or("", |r| r.name);
+    body.label_dim(&format!("{holder} · Sector {sector_name}"));
+    if explored && sector.game.contested(index) {
+        body.label_dim("Contested: an enemy ship is in range");
+    }
+    if explored {
+        body.space(6.0 * scale);
+        secure_controls(&mut body, sector, index);
+    }
+    if explored && PLANETS[index].home {
         let mut tab = sector.details_tab;
-        if planet.home && ui.tabs(&mut tab, &["Overview", "Shipyard"]) {
+        if body.tabs(&mut tab, &["Overview", "Shipyard"]) {
             sector.details_tab = tab;
-            ui.state.request_rebuild = true;
+            body.state.request_rebuild = true;
         }
-        if planet.home && tab == 1 {
-            shipyard(ui, sector);
-        } else {
-            overview(ui, sector, index);
+        if tab == 1 {
+            shipyard(&mut body, sector);
         }
     }
-    ui.space(15.0 * scale);
-    if ui.button_wide("Close").clicked {
-        sector.selected = None;
-        ui.state.request_rebuild = true;
-    }
+    body.finish();
+    ui.draw.set_layer(ui.layer());
 }
 
-fn overview(ui: &mut Ui, sector: &mut Sector, index: usize) {
-    let planet = &PLANETS[index];
+/// A framed portrait: the world lit from the upper left, or a question mark
+/// until a ship has seen it.
+fn picture(ui: &mut Ui, frame: Rect, index: usize, explored: bool) {
     let scale = ui.m.scale;
-    let state = sector.game.planets[index].clone();
-    ui.space(10.0 * scale);
-    ui.label(&format!(
-        "Secure: {} turns · decay {}",
-        planet.secure_turns, planet.decay
-    ));
-    let production: Vec<String> = Resource::ALL
-        .iter()
-        .filter(|resource| planet.yield_per_turn.get(**resource) > 0)
-        .map(|resource| {
-            format!(
-                "{} +{}",
-                short(*resource),
-                planet.yield_per_turn.get(*resource)
-            )
-        })
-        .collect();
-    ui.label(&if production.is_empty() {
-        "Produces nothing".to_string()
-    } else {
-        format!("Per turn: {}", production.join(" · "))
-    });
-    if state.owner == Some(Side::Player) {
-        if sector.game.contested(index) {
-            ui.label_dim("Contested: an enemy ship is in range");
-        }
+    ui.draw.rect(frame, Color::hex(0x030304));
+    ui.draw
+        .stroke_rect(frame, 2.0 * scale, 4.0 * scale, theme::EDGE);
+    let center = frame.center();
+    let radius = frame.width() * 0.32;
+    if !explored {
+        ui.draw
+            .ring(center, radius, 2.0 * scale, theme::CHARTED.fade(0.6));
+        ui.text_centered("?", &ui.text_style().bold(), frame, theme::TEXT_DIM);
         return;
     }
-    ui.space(10.0 * scale);
+    let color = PLANETS[index].color;
+    ui.draw.circle(center, radius * 1.35, color.fade(0.12));
+    ui.draw
+        .circle_gradient(center, radius, color, color.scale_rgb(0.22));
+    ui.draw.circle(
+        center + Vec2::new(-radius * 0.35, -radius * 0.38),
+        radius * 0.24,
+        Color::WHITE.fade(0.22),
+    );
+    ui.draw.ring(
+        center,
+        radius + 1.0 * scale,
+        1.5 * scale,
+        Color::WHITE.fade(0.08),
+    );
+}
+
+/// The secure button, or the effort's progress once it is under way.
+fn secure_controls(ui: &mut Ui, sector: &mut Sector, index: usize) {
+    let planet = &PLANETS[index];
+    let state = sector.game.planets[index].clone();
+    if state.owner == Some(Side::Player) {
+        return;
+    }
     if state.securing {
         ui.progress(
             &format!("{} / {} turns", state.influence, planet.secure_turns),
             f64::from(state.influence) / f64::from(planet.secure_turns.max(1)),
         );
-    } else {
-        let action = Action::SecurePlanet { planet: index };
-        let response = ui.button_wide(action.definition().name);
-        ui.tooltip(&response, action.definition().description);
-        if response.clicked {
-            sector.message = actions::execute(&mut sector.game, Side::Player, action)
-                .err()
-                .map(|error| error.to_string());
-            ui.state.request_rebuild = true;
+        return;
+    }
+    let action = Action::SecurePlanet { planet: index };
+    let response = ui.button_wide(action.definition().name);
+    ui.tooltip(&response, action.definition().description);
+    if response.clicked {
+        sector.message = actions::execute(&mut sector.game, Side::Player, action)
+            .err()
+            .map(|error| error.to_string());
+        ui.state.request_rebuild = true;
+    }
+}
+
+/// Name with the security icons beside it, then yields.
+fn heading(ui: &mut Ui, index: usize, explored: bool) {
+    let planet = &PLANETS[index];
+    let scale = ui.m.scale;
+    ui.row(|ui| {
+        ui.heading(planet.name);
+        if explored {
+            Icon::Secure.badge(ui, &planet.secure_turns.to_string());
+            Icon::Decay.badge(ui, &planet.decay.to_string());
         }
+    });
+    if !explored {
+        ui.paragraph("Charted from afar. Send a ship to see what is there.");
+        return;
+    }
+    ui.space(6.0 * scale);
+    let yields: Vec<(Icon, u32)> = [
+        (Icon::Alloys, Resource::Alloys),
+        (Icon::Electronics, Resource::Electronics),
+    ]
+    .into_iter()
+    .map(|(icon, resource)| (icon, planet.yield_per_turn.get(resource)))
+    .filter(|(_, amount)| *amount > 0)
+    .collect();
+    if yields.is_empty() {
+        ui.label_dim("Produces nothing");
+    } else {
+        ui.row(|ui| {
+            for (icon, amount) in yields {
+                icon.badge(ui, &format!("+{amount}"));
+            }
+        });
     }
 }
 
@@ -163,12 +194,12 @@ fn shipyard(ui: &mut Ui, sector: &mut Sector) {
     }
     let kind = ShipKind::Scout;
     let cost = kind.cost();
-    ui.label(&format!(
-        "{}: {} Alloys · {} Electronics",
-        kind.name(),
-        cost.alloys,
-        cost.electronics
-    ));
+    ui.row(|ui| {
+        ui.label(&format!("{} costs", kind.name()));
+        Icon::Alloys.badge(ui, &cost.alloys.to_string());
+        Icon::Electronics.badge(ui, &cost.electronics.to_string());
+    });
+    ui.space(10.0 * scale);
     let action = Action::BuildShip { kind };
     let response = ui.button_wide(&format!("Build {}", kind.name()));
     ui.tooltip(&response, action.definition().description);
@@ -177,13 +208,5 @@ fn shipyard(ui: &mut Ui, sector: &mut Sector) {
             .err()
             .map(|error| error.to_string());
         ui.state.request_rebuild = true;
-    }
-}
-
-/// Short names fit the popup; the Command Strip spells them out.
-fn short(resource: Resource) -> &'static str {
-    match resource {
-        Resource::Alloys => "Alloys",
-        Resource::Electronics => "Electronics",
     }
 }

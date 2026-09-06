@@ -15,17 +15,6 @@ pub(crate) enum Resource {
     Electronics,
 }
 
-impl Resource {
-    pub(crate) const ALL: [Resource; 2] = [Resource::Alloys, Resource::Electronics];
-
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            Self::Alloys => "Alloys",
-            Self::Electronics => "Advanced Electronics",
-        }
-    }
-}
-
 /// Amounts of each resource: a stockpile, a cost, or a per-turn yield.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Resources {

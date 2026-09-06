@@ -1,12 +1,17 @@
-use lntrn_math::{Color, Rect, Vec2};
+use lntrn_math::{Rect, Vec2};
 use lntrn_render::DrawList;
 use lntrn_text::TextEngine;
-use lntrn_ui::{CursorIcon, Event, Key, Modifiers, Theme, Ui, UiState, WidgetId};
+use lntrn_ui::{Event, Key, Modifiers, MouseButton, Theme, Ui, UiState, WidgetId};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 
 use crate::camera::Backdrop;
 use crate::sector::{self, Sector};
+use crate::theme;
+
+/// A right press that moves less than this many logical pixels is a click,
+/// which deselects, rather than a drag, which pans.
+const DRAG_THRESHOLD: f64 = 6.0;
 
 #[derive(Default, Debug, PartialEq, Eq)]
 enum Screen {
@@ -33,16 +38,7 @@ impl Default for Interface {
             text: TextEngine::new("Inter", "JetBrains Mono"),
             draw: DrawList::new(),
             state: UiState::new(),
-            theme: Theme {
-                text_size: 30.0,
-                heading_size: 45.0,
-                widget_height: 65.0,
-                padding: 15.0,
-                gap: 10.0,
-                text: Color::hex(0xEFF5FF),
-                text_dim: Color::hex(0xB5C6DD),
-                ..Theme::nightfall()
-            },
+            theme: theme::theme(),
             events: Vec::new(),
             modifiers: Modifiers::NONE,
             pointer: Vec2::new(-1.0, -1.0),
@@ -69,17 +65,7 @@ impl Interface {
         let metrics = self.theme.metrics(scale);
         let events = std::mem::take(&mut self.events);
         if self.screen == Screen::Sector {
-            for event in &events {
-                if let Event::Button {
-                    button: lntrn_ui::MouseButton::Right,
-                    pressed: true,
-                    pos,
-                    ..
-                } = event
-                {
-                    self.sector.move_requests.push(*pos);
-                }
-            }
+            self.track_right_button(&events, scale);
         }
         for iteration in 0..4 {
             self.state
@@ -90,12 +76,10 @@ impl Interface {
                 .take_key(|key| key.key == Key::Escape && !key.repeat)
                 .is_some()
                 && self.screen == Screen::Sector
+                && self.sector.selected_fleet.take().is_none()
+                && self.sector.selected.take().is_none()
             {
-                if self.sector.selected_fleet.take().is_none()
-                    && self.sector.selected.take().is_none()
-                {
-                    self.screen = Screen::MainMenu;
-                }
+                self.screen = Screen::MainMenu;
                 self.sector.message = None;
                 self.state.focus = None;
             }
@@ -142,6 +126,42 @@ impl Interface {
         }
     }
 
+    /// Lantern only tracks the left button through a drag, so the right button
+    /// is followed here: a drag pans the map, a plain click deselects.
+    fn track_right_button(&mut self, events: &[Event], scale: f64) {
+        for event in events {
+            match event {
+                Event::Button {
+                    button: MouseButton::Right,
+                    pressed: true,
+                    pos,
+                    ..
+                } => {
+                    self.sector.right_press = Some(*pos);
+                    self.sector.right_dragged = false;
+                }
+                Event::Button {
+                    button: MouseButton::Right,
+                    pressed: false,
+                    ..
+                } => {
+                    if self.sector.right_press.take().is_some() && !self.sector.right_dragged {
+                        self.sector.deselect();
+                        self.state.request_rebuild = true;
+                    }
+                }
+                Event::PointerMoved(pos) => {
+                    if let Some(press) = self.sector.right_press
+                        && (*pos - press).length() > DRAG_THRESHOLD * scale
+                    {
+                        self.sector.right_dragged = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// The starfield uniforms for this frame: three `vec4<f32>` values.
     pub(crate) fn backdrop_uniform(&self, size: PhysicalSize<u32>, scale: f64) -> [f32; 12] {
         let viewport = Vec2::new(size.width as f64, size.height as f64);
@@ -175,43 +195,35 @@ impl Interface {
     pub(crate) fn wake_after(&self) -> Option<f64> {
         self.state.wake_after
     }
-
-    pub(crate) fn cursor(&self) -> winit::window::CursorIcon {
-        match self.state.cursor_icon {
-            CursorIcon::Pointer => winit::window::CursorIcon::Pointer,
-            CursorIcon::Grabbing => winit::window::CursorIcon::Grabbing,
-            _ => winit::window::CursorIcon::Default,
-        }
-    }
 }
 
 fn main_menu(ui: &mut Ui, bounds: Rect) -> bool {
     let scale = ui.m.scale;
     let panel = Rect::from_xywh(
-        40.0 * scale,
-        (bounds.height() - 530.0 * scale) * 0.5,
-        460.0 * scale,
-        530.0 * scale,
+        120.0 * scale,
+        (bounds.height() - 640.0 * scale) * 0.5,
+        620.0 * scale,
+        640.0 * scale,
     );
     panel_background(ui, panel);
     ui.draw.rect(
         Rect::from_xywh(
             panel.min.x,
-            panel.min.y + 30.0 * scale,
-            3.0 * scale,
-            95.0 * scale,
+            panel.min.y + 40.0 * scale,
+            4.0 * scale,
+            120.0 * scale,
         ),
-        ui.theme.accent,
+        theme::GOLD,
     );
     let mut start = false;
-    region(ui, panel.shrink(35.0 * scale), "main-menu", |ui| {
+    region(ui, panel.shrink(45.0 * scale), "main-menu", |ui| {
         ui.heading("STARFALL");
         ui.heading("DOMINION");
-        ui.space(15.0 * scale);
+        ui.space(20.0 * scale);
         ui.label("The Farlight Expanse");
         ui.space(10.0 * scale);
         ui.paragraph("The last bastion of freedom in a sector claimed by war.");
-        ui.space(30.0 * scale);
+        ui.space(40.0 * scale);
         start = ui.button_wide("Start Game").clicked;
     });
     start
@@ -219,7 +231,7 @@ fn main_menu(ui: &mut Ui, bounds: Rect) -> bool {
 
 pub(crate) fn panel_background(ui: &mut Ui, rect: Rect) {
     ui.floating_panel(rect, ui.theme.panel);
-    ui.outline(rect, ui.m.px(1.0), Color::hex(0x43546E));
+    ui.outline(rect, ui.m.px(1.0), theme::EDGE);
 }
 
 pub(crate) fn region(ui: &mut Ui, rect: Rect, name: &str, draw: impl FnOnce(&mut Ui)) {

@@ -1,21 +1,18 @@
 //! Fleets on the map: selection, order previews, and the glide that plays a
 //! committed order out on screen after the rules have already resolved it.
 use lntrn_math::{Color, Rect, Vec2};
-use lntrn_ui::{CursorIcon, Sense, Ui};
+use lntrn_ui::{Sense, Ui};
 
 use crate::actions::{self, Action, Preview};
 use crate::camera::Camera;
 use crate::sector::Sector;
+use crate::theme;
 use crate::world::{Fleet, Side};
 
 /// World units per second a ship covers on screen: a full scout move takes well
 /// over a second, so it reads as flying rather than flashing across.
 const GLIDE_SPEED: f64 = 110.0;
 const GLIDE_SECONDS: (f64, f64) = (0.3, 1.8);
-const ACCENT: Color = Color::hex(0xA2E7FF);
-const HULL: Color = Color::hex(0x4D91BC);
-const ENEMY: Color = Color::hex(0xF38F8F);
-const ENEMY_HULL: Color = Color::hex(0xA85A5A);
 
 /// A committed order playing out on screen. The rules moved the fleet instantly.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -199,14 +196,11 @@ pub(crate) fn draw_all(
             sector.message = None;
             ui.state.request_rebuild = true;
         }
-        if response.hovered {
-            ui.state.cursor_icon = CursorIcon::Pointer;
-        }
         let point = hit.center();
         let (accent, hull) = if owner == Side::Player {
-            (ACCENT, HULL)
+            (theme::SHIP, theme::SHIP_HULL)
         } else {
-            (ENEMY, ENEMY_HULL)
+            (theme::DOMINION, theme::DOMINION_HULL)
         };
         if sector.selected_fleet == Some(*id) {
             // Range and preview start where the rules have the fleet: the next order begins there.
@@ -246,13 +240,14 @@ fn preview(ui: &mut Ui, camera: &Camera, sector: &Sector, fleet_id: u32, anchor:
         return;
     };
     let endpoint = camera.to_screen(destination);
-    ui.draw.line(anchor, endpoint, 2.0 * scale, ACCENT);
-    ui.draw.ring(endpoint, 7.0 * scale, 2.0 * scale, ACCENT);
+    ui.draw.line(anchor, endpoint, 2.0 * scale, theme::SHIP);
+    ui.draw
+        .ring(endpoint, 7.0 * scale, 2.0 * scale, theme::SHIP);
     let label = Rect::from_min_size(
         endpoint + Vec2::new(15.0, -45.0) * scale,
         Vec2::new(200.0, 45.0) * scale,
     );
-    ui.fill_square(label, Color::hex(0x101925).fade(0.9));
+    ui.fill_square(label, theme::PANEL_FILL.fade(0.9));
     ui.text_in_rect(
         &format!("{cost:.0} units"),
         &ui.text_style(),

@@ -1,16 +1,19 @@
 mod actions;
 mod app;
 mod camera;
+mod cursor;
 mod details;
 mod economy;
 mod fleet;
 mod fog;
 mod gpu;
+mod icons;
 mod interface;
 mod layout;
 mod map;
 mod planets;
 mod sector;
+mod theme;
 mod world;
 
 use std::process::ExitCode;

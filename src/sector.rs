@@ -1,11 +1,13 @@
 use crate::actions::{self, Action};
-use crate::camera::{Camera, View};
+use crate::camera::View;
 use crate::details;
 use crate::economy::Resource;
 use crate::fleet::{self, ShipVisual};
 use crate::fog::Fog;
+use crate::icons::Icon;
+use crate::theme;
 use crate::world::{Game, Side};
-use lntrn_math::{Color, Rect, Vec2};
+use lntrn_math::{Rect, Vec2};
 use lntrn_ui::{Response, Sense, Ui, WidgetId};
 
 use crate::interface::region;
@@ -14,13 +16,11 @@ use crate::interface::region;
 const TOP_BAR: f64 = 75.0;
 /// Logical diameter of the round End Turn button in the bottom-right corner.
 const END_TURN_SIZE: f64 = 150.0;
-const ALLOY_COLOR: Color = Color::hex(0xC9B79C);
-const ELECTRONICS_COLOR: Color = Color::hex(0x8EDBE7);
 
 pub(crate) struct Sector {
-    /// The planet whose details popup is open.
+    /// The planet whose details panel is open.
     pub(crate) selected: Option<usize>,
-    /// Which tab of the popup is showing: 0 Overview, 1 Shipyard.
+    /// Which tab of the panel is showing: 0 Overview, 1 Shipyard.
     pub(crate) details_tab: usize,
     pub(crate) view: View,
     pub(crate) game: Game,
@@ -32,8 +32,11 @@ pub(crate) struct Sector {
     pub(crate) selected_fleet: Option<u32>,
     /// Headings and glides, one per ship the screen has drawn.
     pub(crate) ships: Vec<ShipVisual>,
+    /// Where the right button went down, while it is held.
+    pub(crate) right_press: Option<Vec2>,
+    /// The held right button has moved far enough to count as a drag.
+    pub(crate) right_dragged: bool,
     pub(crate) message: Option<String>,
-    pub(crate) move_requests: Vec<Vec2>,
 }
 
 impl Default for Sector {
@@ -48,8 +51,9 @@ impl Default for Sector {
             game,
             selected_fleet: None,
             ships: Vec::new(),
+            right_press: None,
+            right_dragged: false,
             message: None,
-            move_requests: Vec::new(),
         }
     }
 }
@@ -61,6 +65,13 @@ impl Sector {
         self.game.vision_sources_shown(Side::Player, |fleet| {
             fleet::shown_position(self, fleet, now)
         })
+    }
+
+    /// Drop the selected ship and close the planet panel.
+    pub(crate) fn deselect(&mut self) {
+        self.selected_fleet = None;
+        self.selected = None;
+        self.message = None;
     }
 
     #[cfg(test)]
@@ -78,8 +89,8 @@ pub(crate) fn map_region(bounds: Rect, scale: f64) -> Rect {
 pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
     let scale = ui.m.scale;
     let bar = Rect::from_xywh(0.0, 0.0, bounds.width(), TOP_BAR * scale);
-    ui.fill_square(bar, Color::hex(0x05070C));
-    ui.hline(bar.max.y, 0.0, bounds.max.x, Color::hex(0x1E2633));
+    ui.fill_square(bar, theme::INK);
+    ui.hline(bar.max.y, 0.0, bounds.max.x, theme::EDGE);
     tracker(ui, sector, bar);
     let mut menu = false;
     region(
@@ -97,7 +108,7 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
     );
 
     // The End Turn button floats over the map. It takes its click before the
-    // map's pan can, and is drawn after the map so it sits on top.
+    // map can, and is drawn after the map so it sits on top.
     let end_turn = Rect::from_center_size(
         bounds.max - Vec2::splat((25.0 + END_TURN_SIZE * 0.5) * scale),
         Vec2::splat(END_TURN_SIZE * scale),
@@ -105,19 +116,11 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
     let (end_turn_id, end_turn_response) = end_turn_interact(ui, end_turn);
 
     let map = map_region(bounds, scale);
-    let camera = Camera::new(map, scale, sector.view.center, sector.view.zoom);
-    let popup = sector
-        .selected
-        .map(|index| details::rect(map, &camera, index, scale));
-    // Right-clicks on floating panels are not orders for the map underneath.
-    sector.move_requests.retain(|point| {
-        !end_turn.contains(*point) && !popup.is_some_and(|rect| rect.contains(*point))
-    });
     region(ui, map, "sector-map", |ui| {
         crate::map::draw(ui, map, sector)
     });
-    if let (Some(index), Some(rect)) = (sector.selected, popup) {
-        details::draw(ui, rect, sector, index);
+    if let Some(index) = sector.selected {
+        details::draw(ui, details::rect(map, scale), sector, index);
     }
     end_turn_draw(ui, end_turn, end_turn_id, &end_turn_response, sector);
     if let Some(message) = &sector.message {
@@ -127,54 +130,37 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
             bounds.width() - 50.0 * scale,
             50.0 * scale,
         );
-        ui.text_in_rect(message, &ui.text_style(), rect, Color::hex(0xF3BB8F));
+        ui.text_in_rect(message, &ui.text_style(), rect, theme::WARNING);
     }
     menu
 }
 
-/// Stockpiles on the Command Strip, each with what arrives when the turn ends.
+/// Stockpiles on the Command Strip: each icon, what you hold, and what arrives
+/// when the turn ends. Hovering an icon names it.
 fn tracker(ui: &mut Ui, sector: &Sector, bar: Rect) {
     let scale = ui.m.scale;
     let income = sector.game.income();
-    let style = ui.text_style();
-    let mut x = 30.0 * scale;
-    for resource in Resource::ALL {
-        let glyph = Vec2::new(x + 14.0 * scale, bar.center().y);
-        match resource {
-            Resource::Alloys => {
-                let corners: Vec<Vec2> = (0..6)
-                    .map(|i| {
-                        glyph
-                            + Vec2::from_angle(f64::from(i) * std::f64::consts::FRAC_PI_3)
-                                * 13.0
-                                * scale
-                    })
-                    .collect();
-                ui.draw.polyline(&corners, 2.5 * scale, ALLOY_COLOR, true);
+    let strip = Rect::from_xywh(
+        20.0 * scale,
+        (bar.height() - ui.m.widget_h) * 0.5,
+        bar.width() - 200.0 * scale,
+        ui.m.widget_h,
+    );
+    region(ui, strip, "resources", |ui| {
+        ui.row(|ui| {
+            for (icon, resource) in [
+                (Icon::Alloys, Resource::Alloys),
+                (Icon::Electronics, Resource::Electronics),
+            ] {
+                let text = format!(
+                    "{} (+{})",
+                    sector.game.stockpile.get(resource),
+                    income.get(resource)
+                );
+                icon.badge(ui, &text);
             }
-            Resource::Electronics => {
-                let chip = Rect::from_center_size(glyph, Vec2::splat(22.0 * scale));
-                ui.draw
-                    .stroke_rect(chip, 2.5 * scale, 3.0 * scale, ELECTRONICS_COLOR);
-                ui.draw.circle(glyph, 3.5 * scale, ELECTRONICS_COLOR);
-            }
-        }
-        let text = format!(
-            "{} {} (+{})",
-            resource.name(),
-            sector.game.stockpile.get(resource),
-            income.get(resource)
-        );
-        let width = ui.measure(&text, &style);
-        let rect = Rect::from_xywh(
-            x + 38.0 * scale,
-            bar.min.y,
-            width + 10.0 * scale,
-            bar.height(),
-        );
-        ui.text_in_rect(&text, &style, rect, ui.theme.text);
-        x += 38.0 * scale + width + 50.0 * scale;
-    }
+        });
+    });
 }
 
 /// Claim input for the End Turn button before the map is drawn.
@@ -201,13 +187,12 @@ fn end_turn_draw(ui: &mut Ui, rect: Rect, id: WidgetId, response: &Response, sec
     } else {
         0.6
     };
-    ui.draw
-        .circle(center, radius, Color::hex(0x101925).fade(0.94));
+    ui.draw.circle(center, radius, theme::PANEL_FILL.fade(0.94));
     ui.draw.ring(
         center,
         radius - 1.5 * scale,
         3.0 * scale,
-        ui.theme.accent.fade(strength),
+        theme::BLUE.fade(strength),
     );
     ui.text_centered(
         action.definition().name,

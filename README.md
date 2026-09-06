@@ -10,26 +10,32 @@ dependencies are `wgpu` and `winit`; Lantern crates are local path dependencies.
 cargo run --offline
 ```
 
-The initial window requests 1280 × 800 logical pixels, with a minimum of
-900 × 640, and has no OS titlebar or replacement window-control bar. Winit reads
-the display scale from the compositor; the renderer uses physical surface sizes.
+The game launches borderless fullscreen with no OS titlebar or window controls;
+F11 drops to a 1280 × 800 logical window (minimum 900 × 640) and back. Winit
+reads the display scale from the compositor; the renderer uses physical surface
+sizes. The pointer is Alva's prism from `assets/cursor.png`, decoded with
+Lantern's image crate and scaled to 96 logical pixels tall for the display.
 
 - **Start Game:** enter the rough sector map, looking at the home region.
-- **Click a planet:** open its details popup above it: who holds it, its sector,
-  turns to secure and decay, what it pays per turn, and a Secure Planet button
-  when it isn't yours. Arcadia's popup has a Shipyard tab.
-- **Left-click the scout:** select it and preview movement toward the cursor.
-- **Right-click the map:** commit the previewed move, capped at remaining range.
-  The scout glides to its destination; the rules resolve the move instantly.
+- **Left-click a planet:** open its details panel on the left of the map: a
+  portrait beside the name, turns-to-secure and decay as icons with numbers,
+  the Secure Planet button when it isn't yours, what it pays per turn as icons,
+  then who holds it and its sector. Arcadia's panel has a Shipyard tab. Every
+  icon names itself on hover. Clicking anywhere outside closes the panel.
+- **Left-click a ship:** select it and preview movement toward the cursor.
+- **Left-click again:** commit the previewed move, capped at remaining range.
+  Clicking a planet with a ship selected sends the ship toward it. The ship
+  glides to its destination; the rules resolve the move instantly.
+- **Right-click:** deselect the ship or close the panel.
 - **End Turn:** the round button in the bottom-right corner, with the turn
   counter beside it. Advances through the enemy's placeholder pass and refreshes
   movement.
-- **Drag empty map space / scroll:** pan / zoom. Zoom eases toward the cursor.
+- **Right-drag / scroll:** pan / zoom. Zoom eases toward the cursor.
 - **Tab / Shift+Tab, Enter / Space:** navigate and activate widgets.
 - **Escape:** deselect a fleet or close planet details, then return to the menu.
 - **Menu:** the only thing in the slim bar across the top. Returns to the main
   menu; starting again resets the rough map.
-- **F11:** toggle borderless fullscreen. Use the window manager to close the game.
+- **F11:** toggle between fullscreen and a window. Use the window manager to close the game.
 
 The window redraws on input and keeps drawing while the camera or a ship is
 moving, then sleeps. There are no downloaded art assets. Widgets, input
@@ -73,8 +79,9 @@ securing planet shows its progress as an arc on the map.
 
 Every planet you hold pays its yield of Alloys and Advanced Electronics when
 you end your turn, unless an enemy ship sits within 200 units, in which case it
-pays nothing that turn. The Command Strip at the top shows each stockpile with
-what arrives next turn in parentheses. Arcadia's Shipyard tab builds a Scout for
+pays nothing that turn. The Command Strip at the top shows each resource as an
+icon, what you hold, and what arrives next turn in parentheses; hover an icon
+for its name. Arcadia's Shipyard tab builds a Scout for
 10 Alloys and 5 Electronics, paid up front; it launches beside Arcadia two turns
 later with full movement. All of these numbers are placeholders in
 `src/planets.rs` and `src/economy.rs`. The rules live in the Action Registry so
