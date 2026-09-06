@@ -2,7 +2,7 @@
 //! in the west, three in the middle, five in the east. An odd count means no ties
 //! for control of the map. Outlines are authored in `LAYOUT_SIZE` units and
 //! stretch with `WORLD_SIZE`, so nudging a corner here moves it on the map.
-use lntrn_math::Vec2;
+use lntrn_math::{Rect, Vec2};
 
 use crate::world::WORLD_SIZE;
 
@@ -74,6 +74,16 @@ impl Region {
         inside
     }
 
+    /// The corners' bounding box, for sampling points inside the sector.
+    pub(crate) fn bounds(&self) -> Rect {
+        let corners = self.corners();
+        let mut bounds = Rect::new(corners[0], corners[0]);
+        for corner in corners {
+            bounds = bounds.union(&Rect::new(corner, corner));
+        }
+        bounds
+    }
+
     /// Area-weighted centre: where the sector's label sits.
     pub(crate) fn centroid(&self) -> Vec2 {
         let mut area = 0.0;
@@ -85,6 +95,10 @@ impl Region {
         }
         sum / (3.0 * area)
     }
+}
+
+pub(crate) fn region_index(point: Vec2) -> Option<usize> {
+    REGIONS.iter().position(|region| region.contains(point))
 }
 
 pub(crate) fn region_of(point: Vec2) -> Option<&'static Region> {

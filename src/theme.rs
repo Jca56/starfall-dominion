@@ -28,6 +28,7 @@ pub(crate) const ALLOYS: Color = GOLD;
 pub(crate) const ELECTRONICS: Color = Color::hex(0x7CC4E8);
 pub(crate) const SECURE: Color = Color::hex(0xD7CBB0);
 pub(crate) const DECAY: Color = Color::hex(0xE08A6A);
+pub(crate) const WRECK: Color = Color::hex(0xC9BFAE);
 pub(crate) const WARNING: Color = Color::hex(0xF3BB8F);
 
 /// Near-black panels and controls, warm text, a gold accent, everything sized up.

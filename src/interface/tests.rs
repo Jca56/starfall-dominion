@@ -1,47 +1,48 @@
 use super::*;
 use crate::camera::{Camera, ZoomRange};
-use crate::economy::Resources;
-use crate::world::{SCOUT_SPEED, SCOUT_VISION, Side, WORLD_SIZE};
+use crate::sector::Selection;
+use crate::world::{SCOUT_SPEED, SCOUT_VISION, WORLD_SIZE};
 use lntrn_ui::{MouseButton, WheelDelta};
 
-fn frame(ui: &mut Interface, scale: f64) {
+pub(super) fn frame(ui: &mut Interface, scale: f64) {
     ui.rebuild(
         PhysicalSize::new((1280.0 * scale) as u32, (800.0 * scale) as u32),
         scale,
     );
 }
 
-fn setup(scale: f64) -> Interface {
+pub(super) fn setup(scale: f64) -> Interface {
     let mut ui = Interface::default();
     assert!(ui.text.face_count() > 0, "The UI needs an installed font");
     ui.state.record_rects = true;
+    ui.fixed_seed = Some(7);
     frame(&mut ui, scale);
     ui
 }
 
-fn widget(ui: &Interface, region: &str, name: &str) -> Rect {
+pub(super) fn widget(ui: &Interface, region: &str, name: &str) -> Rect {
     ui.state.rects[&WidgetId::ROOT.with(region).with(name)]
 }
 
-fn tab(ui: &Interface, region: &str, label: &str, index: usize) -> Rect {
+pub(super) fn tab(ui: &Interface, region: &str, label: &str, index: usize) -> Rect {
     ui.state.rects[&WidgetId::ROOT.with(region).with(label).with_index(index)]
 }
 
-fn planet(name: &str) -> &'static crate::planets::Planet {
+pub(super) fn planet(name: &str) -> &'static crate::planets::Planet {
     crate::planets::PLANETS
         .iter()
         .find(|planet| planet.name == name)
         .expect("a named planet")
 }
 
-fn map_region(scale: f64) -> Rect {
+pub(super) fn map_region(scale: f64) -> Rect {
     sector::map_region(
         Rect::from_xywh(0.0, 0.0, 1280.0 * scale, 800.0 * scale),
         scale,
     )
 }
 
-fn button(button: MouseButton, pressed: bool, pos: Vec2) -> Event {
+pub(super) fn button(button: MouseButton, pressed: bool, pos: Vec2) -> Event {
     Event::Button {
         button,
         pressed,
@@ -51,7 +52,7 @@ fn button(button: MouseButton, pressed: bool, pos: Vec2) -> Event {
 }
 
 /// A left click: press and release in place, a frame each.
-fn click(ui: &mut Interface, point: Vec2, scale: f64) {
+pub(super) fn click(ui: &mut Interface, point: Vec2, scale: f64) {
     ui.events.push(Event::PointerMoved(point));
     ui.events.push(button(MouseButton::Left, true, point));
     frame(ui, scale);
@@ -60,7 +61,7 @@ fn click(ui: &mut Interface, point: Vec2, scale: f64) {
 }
 
 /// A right click without movement: deselects.
-fn right_click(ui: &mut Interface, point: Vec2, scale: f64) {
+pub(super) fn right_click(ui: &mut Interface, point: Vec2, scale: f64) {
     ui.events.push(Event::PointerMoved(point));
     ui.events.push(button(MouseButton::Right, true, point));
     frame(ui, scale);
@@ -69,7 +70,7 @@ fn right_click(ui: &mut Interface, point: Vec2, scale: f64) {
 }
 
 /// A right drag from `from` to `to`: pans.
-fn right_drag(ui: &mut Interface, from: Vec2, to: Vec2, scale: f64) {
+pub(super) fn right_drag(ui: &mut Interface, from: Vec2, to: Vec2, scale: f64) {
     ui.events.push(Event::PointerMoved(from));
     ui.events.push(button(MouseButton::Right, true, from));
     frame(ui, scale);
@@ -79,19 +80,19 @@ fn right_drag(ui: &mut Interface, from: Vec2, to: Vec2, scale: f64) {
     frame(ui, scale);
 }
 
-fn start_game(ui: &mut Interface, scale: f64) {
+pub(super) fn start_game(ui: &mut Interface, scale: f64) {
     let start = widget(ui, "main-menu", "Start Game");
     click(ui, start.center(), scale);
     assert_eq!(ui.screen, Screen::Sector);
 }
 
-fn camera(ui: &Interface, scale: f64) -> Camera {
+pub(super) fn camera(ui: &Interface, scale: f64) -> Camera {
     let view = &ui.sector.view;
     Camera::new(map_region(scale), scale, view.center, view.zoom)
 }
 
 /// Run the clock forward by hand until every animation has stopped asking for frames.
-fn let_motion_finish(ui: &mut Interface, scale: f64) {
+pub(super) fn let_motion_finish(ui: &mut Interface, scale: f64) {
     for tick in 0..40 {
         ui.state.set_time(100.0 + tick as f64 * 0.1);
         frame(ui, scale);
@@ -111,7 +112,7 @@ fn start_planet_details_and_return_work_at_both_display_scales() {
         frame(&mut ui, scale);
         let arcadia = widget(&ui, "sector-map", "Arcadia");
         click(&mut ui, arcadia.center(), scale);
-        assert_eq!(ui.sector.selected, Some(2));
+        assert_eq!(ui.sector.selected, Some(Selection::Planet(2)));
         // Empty space, away from the panel down the left: closes it.
         click(&mut ui, Vec2::new(1000.0, 300.0) * scale, scale);
         assert_eq!(ui.sector.selected, None);
@@ -405,80 +406,4 @@ fn the_chart_reveals_as_the_ship_glides_and_catches_up_when_it_lands() {
         ui.wake_after().is_none(),
         "A landed ship stops asking for frames"
     );
-}
-
-#[test]
-fn the_home_world_shipyard_builds_a_scout_when_you_can_afford_it() {
-    let mut ui = setup(1.0);
-    start_game(&mut ui, 1.0);
-    let zoom = ui.sector.view.zoom;
-    ui.sector.view.snap(planet("Arcadia").position, zoom);
-    frame(&mut ui, 1.0);
-    let arcadia = widget(&ui, "sector-map", "Arcadia");
-    click(&mut ui, arcadia.center(), 1.0);
-    let shipyard = tab(&ui, "planet-details", "Shipyard", 1);
-    click(&mut ui, shipyard.center(), 1.0);
-    let build = widget(&ui, "planet-details", "Build Scout");
-    click(&mut ui, build.center(), 1.0);
-    assert_eq!(ui.sector.message.as_deref(), Some("Not enough resources."));
-    assert!(ui.sector.game.shipyard.is_none());
-    ui.sector.game.stockpile = Resources::new(10, 5);
-    frame(&mut ui, 1.0);
-    let build = widget(&ui, "planet-details", "Build Scout");
-    click(&mut ui, build.center(), 1.0);
-    assert!(ui.sector.game.shipyard.is_some());
-    assert!(ui.sector.game.stockpile.is_empty());
-    right_click(&mut ui, Vec2::new(1000.0, 300.0), 1.0);
-    assert_eq!(ui.sector.selected, None, "A right click closes the panel");
-    let end = widget(&ui, "turn-controls", "End Turn");
-    click(&mut ui, end.center(), 1.0);
-    click(&mut ui, end.center(), 1.0);
-    assert_eq!(
-        ui.sector.game.fleets.len(),
-        2,
-        "Two turns later the scout launches"
-    );
-    assert_eq!(ui.sector.game.fleets[1].name, "Scout 2");
-    let pay = planet("Arcadia").yield_per_turn;
-    assert_eq!(
-        ui.sector.game.stockpile,
-        pay.plus(pay),
-        "Arcadia paid out twice meanwhile"
-    );
-}
-
-#[test]
-fn securing_a_planet_from_the_panel_takes_turns_in_range() {
-    let mut ui = setup(1.0);
-    start_game(&mut ui, 1.0);
-    let ship = widget(&ui, "sector-map", "Farlight Scout");
-    click(&mut ui, ship.center(), 1.0);
-    let origin = ui.sector.game.fleets[0].position;
-    let target = planet("L2-b");
-    let toward = target.position - origin;
-    // Short of a full move so the target point stays inside the small test window.
-    let stop = origin + toward / toward.length() * (SCOUT_SPEED - 20.0);
-    let point = camera(&ui, 1.0).to_screen(stop);
-    click(&mut ui, point, 1.0);
-    let_motion_finish(&mut ui, 1.0);
-    assert!(
-        ui.sector.game.fog.explored_at(target.position),
-        "Now in sight"
-    );
-    right_click(&mut ui, point, 1.0);
-    assert!(ui.sector.selected_fleet.is_none());
-    let zoom = ui.sector.view.zoom;
-    ui.sector.view.snap(target.position, zoom);
-    frame(&mut ui, 1.0);
-    let marker = widget(&ui, "sector-map", "L2-b");
-    click(&mut ui, marker.center(), 1.0);
-    let secure = widget(&ui, "planet-details", "Secure Planet");
-    click(&mut ui, secure.center(), 1.0);
-    assert!(ui.sector.game.planets[3].securing);
-    right_click(&mut ui, Vec2::new(1000.0, 300.0), 1.0);
-    let end = widget(&ui, "turn-controls", "End Turn");
-    for _ in 0..target.secure_turns {
-        click(&mut ui, end.center(), 1.0);
-    }
-    assert_eq!(ui.sector.game.planets[3].owner, Some(Side::Player));
 }

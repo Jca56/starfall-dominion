@@ -59,6 +59,22 @@ impl Resources {
     pub(crate) fn is_empty(self) -> bool {
         self == Self::default()
     }
+
+    /// "9 Alloys and 3 Advanced Electronics", or "nothing".
+    pub(crate) fn describe(self) -> String {
+        let mut parts = Vec::new();
+        if self.alloys > 0 {
+            parts.push(format!("{} Alloys", self.alloys));
+        }
+        if self.electronics > 0 {
+            parts.push(format!("{} Advanced Electronics", self.electronics));
+        }
+        if parts.is_empty() {
+            "nothing".to_string()
+        } else {
+            parts.join(" and ")
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +180,7 @@ impl Game {
             self.shipyard = None;
             self.launch(kind);
         }
+        self.advance_pois();
     }
 
     fn advance_securing(&mut self, index: usize) {

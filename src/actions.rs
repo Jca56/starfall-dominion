@@ -5,6 +5,7 @@ use lntrn_math::Vec2;
 
 use crate::economy::{Build, Resources, ShipKind};
 use crate::planets::PLANETS;
+use crate::poi::SALVAGE_RANGE;
 use crate::world::{Game, Side, WORLD_SIZE};
 
 const EPSILON: f64 = 1.0e-8;
@@ -26,6 +27,10 @@ pub(crate) const BUILD_SHIP: ActionDefinition = ActionDefinition {
     name: "Build Ship",
     description: "Spend resources at the shipyard. The ship launches from the home world when done.",
 };
+pub(crate) const SALVAGE: ActionDefinition = ActionDefinition {
+    name: "Salvage",
+    description: "Haul the wreck's loot home. A ship must be within 100 units.",
+};
 pub(crate) const END_TURN: ActionDefinition = ActionDefinition {
     name: "End Turn",
     description: "Finish your orders and let the Dominion take its turn.",
@@ -36,6 +41,7 @@ pub(crate) enum Action {
     MoveFleet { fleet_id: u32, destination: Vec2 },
     SecurePlanet { planet: usize },
     BuildShip { kind: ShipKind },
+    Salvage { poi: u32 },
     EndTurn,
 }
 
@@ -45,6 +51,7 @@ impl Action {
             Self::MoveFleet { .. } => &MOVE_FLEET,
             Self::SecurePlanet { .. } => &SECURE_PLANET,
             Self::BuildShip { .. } => &BUILD_SHIP,
+            Self::Salvage { .. } => &SALVAGE,
             Self::EndTurn => &END_TURN,
         }
     }
@@ -52,9 +59,25 @@ impl Action {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Preview {
-    Move { destination: Vec2, cost: f64 },
-    Secure { planet: usize },
-    Build { kind: ShipKind, cost: Resources },
+    Move {
+        destination: Vec2,
+        cost: f64,
+    },
+    Secure {
+        planet: usize,
+    },
+    Build {
+        kind: ShipKind,
+        cost: Resources,
+    },
+    /// Validation only; the loot is rolled on commit.
+    Salvage {
+        poi: u32,
+    },
+    /// What a committed salvage paid.
+    Salvaged {
+        reward: Resources,
+    },
     EndTurn,
 }
 
@@ -74,6 +97,8 @@ pub(crate) enum ActionError {
     NoShipyard,
     ShipyardBusy,
     CannotAfford,
+    UnknownPoi,
+    NoShipNearby,
     TurnLimit,
 }
 
@@ -94,6 +119,8 @@ impl fmt::Display for ActionError {
             Self::NoShipyard => "Only the Farlight home world has a shipyard.",
             Self::ShipyardBusy => "The shipyard is already building a ship.",
             Self::CannotAfford => "Not enough resources.",
+            Self::UnknownPoi => "There is nothing there to salvage.",
+            Self::NoShipNearby => "No ship within 100 units to salvage it.",
             Self::TurnLimit => "The turn counter has reached its limit.",
         })
     }
@@ -144,6 +171,16 @@ pub(crate) fn preview(game: &Game, actor: Side, action: Action) -> Result<Previe
                 return Err(ActionError::CannotAfford);
             }
             Ok(Preview::Build { kind, cost })
+        }
+        Action::Salvage { poi } => {
+            let wreck = game.poi(poi).ok_or(ActionError::UnknownPoi)?;
+            let near = game.fleets.iter().any(|f| {
+                f.owner == actor && (f.position - wreck.position).length() <= SALVAGE_RANGE
+            });
+            if !near {
+                return Err(ActionError::NoShipNearby);
+            }
+            Ok(Preview::Salvage { poi })
         }
     }
 }
@@ -205,7 +242,7 @@ pub(crate) fn execute(
     actor: Side,
     action: Action,
 ) -> Result<Preview, ActionError> {
-    let result = preview(game, actor, action)?;
+    let mut result = preview(game, actor, action)?;
     match (action, result) {
         (Action::MoveFleet { fleet_id, .. }, Preview::Move { destination, cost }) => {
             let fleet = game
@@ -233,6 +270,11 @@ pub(crate) fn execute(
                 kind,
                 turns_left: kind.build_turns(),
             });
+        }
+        (Action::Salvage { poi }, Preview::Salvage { .. }) => {
+            result = Preview::Salvaged {
+                reward: game.salvage(poi),
+            };
         }
         (Action::EndTurn, Preview::EndTurn) => {
             if actor == Side::Player {

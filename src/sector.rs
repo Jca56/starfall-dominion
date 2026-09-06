@@ -17,9 +17,16 @@ const TOP_BAR: f64 = 75.0;
 /// Logical diameter of the round End Turn button in the bottom-right corner.
 const END_TURN_SIZE: f64 = 150.0;
 
+/// What the details panel is showing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Selection {
+    Planet(usize),
+    Poi(u32),
+}
+
 pub(crate) struct Sector {
-    /// The planet whose details panel is open.
-    pub(crate) selected: Option<usize>,
+    /// What the details panel is open on.
+    pub(crate) selected: Option<Selection>,
     /// Which tab of the panel is showing: 0 Overview, 1 Shipyard.
     pub(crate) details_tab: usize,
     pub(crate) view: View,
@@ -41,7 +48,12 @@ pub(crate) struct Sector {
 
 impl Default for Sector {
     fn default() -> Self {
-        let game = Game::default();
+        Self::new(Game::default())
+    }
+}
+
+impl Sector {
+    pub(crate) fn new(game: Game) -> Self {
         Self {
             selected: None,
             details_tab: 0,
@@ -56,9 +68,7 @@ impl Default for Sector {
             message: None,
         }
     }
-}
 
-impl Sector {
     /// What lights the map on screen: the rules' view, except a gliding ship
     /// shines from where it is drawn.
     pub(crate) fn shown_vision_sources(&self, now: f64) -> Vec<(Vec2, f64)> {
@@ -119,8 +129,8 @@ pub(crate) fn draw(ui: &mut Ui, bounds: Rect, sector: &mut Sector) -> bool {
     region(ui, map, "sector-map", |ui| {
         crate::map::draw(ui, map, sector)
     });
-    if let Some(index) = sector.selected {
-        details::draw(ui, details::rect(map, scale), sector, index);
+    if let Some(selection) = sector.selected {
+        details::draw(ui, details::rect(map, scale), sector, selection);
     }
     end_turn_draw(ui, end_turn, end_turn_id, &end_turn_response, sector);
     if let Some(message) = &sector.message {

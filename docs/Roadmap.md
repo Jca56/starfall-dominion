@@ -1,8 +1,14 @@
-
-# UI Improvements
-
-
 # Basic Proc Gen
+- Destroyed Space Station
+
+
+# Ship Stats
+HP
+Speed
+Attack
+Shields
+
+# Ship Combat
 
 
 # Enemy AI
@@ -17,4 +23,4 @@ War without an apponent is just an angry guy yelling at clouds.
 
 
 
-
+ 

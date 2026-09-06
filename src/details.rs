@@ -10,7 +10,7 @@ use crate::icons::Icon;
 use crate::interface::panel_background;
 use crate::layout;
 use crate::planets::PLANETS;
-use crate::sector::Sector;
+use crate::sector::{Sector, Selection};
 use crate::theme;
 use crate::world::Side;
 
@@ -27,7 +27,83 @@ pub(crate) fn rect(map: Rect, scale: f64) -> Rect {
     Rect::from_min_size(map.min + offset, Vec2::new(WIDTH * scale, height))
 }
 
-pub(crate) fn draw(ui: &mut Ui, rect: Rect, sector: &mut Sector, index: usize) {
+pub(crate) fn draw(ui: &mut Ui, rect: Rect, sector: &mut Sector, selection: Selection) {
+    match selection {
+        Selection::Planet(index) => planet(ui, rect, sector, index),
+        Selection::Poi(id) => wreck(ui, rect, sector, id),
+    }
+}
+
+/// A charted wreck: what it is, what it might hold, and the Salvage button.
+fn wreck(ui: &mut Ui, rect: Rect, sector: &mut Sector, id: u32) {
+    let Some(poi) = sector.game.poi(id).cloned() else {
+        sector.selected = None;
+        return;
+    };
+    let scale = ui.m.scale;
+    let layer = ui.layer() + 1;
+    ui.state.keep_popup(rect, layer);
+    let widget_id = ui.id("planet-details");
+    let window = ui.clip();
+    let pad = PADDING * scale;
+    let portrait = Rect::from_min_size(rect.min + Vec2::splat(pad), Vec2::splat(PORTRAIT * scale));
+    let column = Rect::new(
+        Vec2::new(portrait.max.x + 20.0 * scale, rect.min.y + pad),
+        rect.max - Vec2::splat(pad),
+    );
+    let mut header = Ui::new(
+        ui.draw, ui.text, ui.theme, ui.m, ui.state, column, rect, widget_id, layer,
+    );
+    header.set_window_rect(window);
+    panel_background(&mut header, rect);
+    header.draw.rect(portrait, Color::hex(0x030304));
+    header
+        .draw
+        .stroke_rect(portrait, 2.0 * scale, 4.0 * scale, theme::EDGE);
+    Icon::Wreck.draw(&mut header, portrait.center(), portrait.width() * 0.62);
+    header.heading(poi.kind.short_name());
+    header.label_dim(poi.kind.name());
+    let sector_name = layout::region_of(poi.position).map_or("", |r| r.name);
+    header.label_dim(&format!("Sector {sector_name}"));
+    let reached = header.finish();
+
+    let body = Rect::new(
+        Vec2::new(rect.min.x + pad, reached.max(portrait.max.y) + 20.0 * scale),
+        rect.max - Vec2::splat(pad),
+    );
+    let mut body = Ui::new(
+        ui.draw, ui.text, ui.theme, ui.m, ui.state, body, rect, widget_id, layer,
+    );
+    body.set_window_rect(window);
+    body.paragraph(poi.kind.description());
+    body.space(10.0 * scale);
+    body.label_dim("Salvage may hold");
+    let (low, high) = poi.kind.alloys();
+    let (chance, few, many) = poi.kind.electronics();
+    body.row(|ui| {
+        Icon::Alloys.badge(ui, &format!("{low} to {high}"));
+        Icon::Electronics.badge(ui, &format!("{:.0}% for {few} to {many}", chance * 100.0));
+    });
+    body.space(15.0 * scale);
+    let action = Action::Salvage { poi: id };
+    let response = body.button_wide(action.definition().name);
+    body.tooltip(&response, action.definition().description);
+    if response.clicked {
+        match actions::execute(&mut sector.game, Side::Player, action) {
+            Ok(actions::Preview::Salvaged { reward }) => {
+                sector.message = Some(format!("Salvaged {}.", reward.describe()));
+                sector.selected = None;
+            }
+            Ok(_) => {}
+            Err(error) => sector.message = Some(error.to_string()),
+        }
+        body.state.request_rebuild = true;
+    }
+    body.finish();
+    ui.draw.set_layer(ui.layer());
+}
+
+fn planet(ui: &mut Ui, rect: Rect, sector: &mut Sector, index: usize) {
     let scale = ui.m.scale;
     let layer = ui.layer() + 1;
     ui.state.keep_popup(rect, layer);

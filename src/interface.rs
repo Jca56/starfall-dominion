@@ -8,6 +8,7 @@ use winit::event::WindowEvent;
 use crate::camera::Backdrop;
 use crate::sector::{self, Sector};
 use crate::theme;
+use crate::world::Game;
 
 /// A right press that moves less than this many logical pixels is a click,
 /// which deselects, rather than a drag, which pans.
@@ -30,6 +31,8 @@ pub(crate) struct Interface {
     pointer: Vec2,
     screen: Screen,
     sector: Sector,
+    /// Pinned by tests; otherwise every Start Game rolls a new map.
+    fixed_seed: Option<u64>,
 }
 
 impl Default for Interface {
@@ -44,6 +47,7 @@ impl Default for Interface {
             pointer: Vec2::new(-1.0, -1.0),
             screen: Screen::MainMenu,
             sector: Sector::default(),
+            fixed_seed: None,
         }
     }
 }
@@ -98,7 +102,8 @@ impl Interface {
             let changed = match self.screen {
                 Screen::MainMenu => {
                     if main_menu(&mut ui, bounds) {
-                        self.sector = Sector::default();
+                        let seed = self.fixed_seed.unwrap_or_else(clock_seed);
+                        self.sector = Sector::new(Game::new(seed));
                         self.screen = Screen::Sector;
                         true
                     } else {
@@ -197,6 +202,13 @@ impl Interface {
     }
 }
 
+/// A fresh seed for every game, from the wall clock.
+fn clock_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos() as u64)
+}
+
 fn main_menu(ui: &mut Ui, bounds: Rect) -> bool {
     let scale = ui.m.scale;
     let panel = Rect::from_xywh(
@@ -247,5 +259,7 @@ pub(crate) fn region(ui: &mut Ui, rect: Rect, name: &str, draw: impl FnOnce(&mut
     child.finish();
 }
 
+#[cfg(test)]
+mod loop_tests;
 #[cfg(test)]
 mod tests;

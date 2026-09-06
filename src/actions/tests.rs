@@ -1,5 +1,6 @@
 use super::*;
 use crate::economy::SECURE_RANGE;
+use crate::poi::SALVAGE_RANGE;
 use crate::world::{Fleet, SCOUT_SPEED, SCOUT_VISION};
 
 fn order(destination: Vec2) -> Action {
@@ -129,6 +130,20 @@ fn illegal_actions_do_not_mutate_the_game() {
             }
         ),
         Err(ActionError::CannotAfford)
+    );
+    assert_eq!(
+        execute(&mut game, Side::Player, Action::Salvage { poi: 999 }),
+        Err(ActionError::UnknownPoi)
+    );
+    let far = game
+        .pois
+        .iter()
+        .find(|poi| poi.sector == 12)
+        .expect("a wreck in R5")
+        .id;
+    assert_eq!(
+        execute(&mut game, Side::Player, Action::Salvage { poi: far }),
+        Err(ActionError::NoShipNearby)
     );
     assert_eq!(game, before);
     game.fleets[0].owner = Side::Dominion;
@@ -292,4 +307,33 @@ fn the_shipyard_charges_up_front_and_launches_after_two_turns() {
     );
     assert!((launched.position - PLANETS[Game::home_planet()].position).length() < SECURE_RANGE);
     assert_eq!(launched.id, 1);
+}
+
+#[test]
+fn salvage_needs_a_nearby_ship_and_pays_within_the_advertised_range() {
+    let mut game = Game::default();
+    let wreck = game.pois[3].clone();
+    game.fleets[0].position = wreck.position + Vec2::new(SALVAGE_RANGE - 1.0, 0.0);
+    let salvage = Action::Salvage { poi: wreck.id };
+    assert_eq!(
+        preview(&game, Side::Player, salvage),
+        Ok(Preview::Salvage { poi: wreck.id })
+    );
+    let Ok(Preview::Salvaged { reward }) = execute(&mut game, Side::Player, salvage) else {
+        panic!("salvage commits");
+    };
+    let (low, high) = wreck.kind.alloys();
+    let (_, few, many) = wreck.kind.electronics();
+    assert!((low..=high).contains(&reward.alloys));
+    assert!(reward.electronics == 0 || (few..=many).contains(&reward.electronics));
+    assert_eq!(game.stockpile, reward);
+    assert!(game.poi(wreck.id).is_none());
+    assert!(
+        game.respawn[wreck.sector] > 0,
+        "The sector's clock is running"
+    );
+    assert_eq!(
+        execute(&mut game, Side::Player, salvage),
+        Err(ActionError::UnknownPoi)
+    );
 }

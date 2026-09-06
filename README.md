@@ -87,6 +87,22 @@ later with full movement. All of these numbers are placeholders in
 `src/planets.rs` and `src/economy.rs`. The rules live in the Action Registry so
 previews, buttons, and the future AI share one set of checks.
 
+## Points of interest
+
+Each sector holds one point of interest at a time, placed by a seeded generator
+of our own (`src/rng.rs`) so the same seed always makes the same map; Start Game
+seeds from the clock. A point spawns inside its sector, at least 150 units from
+any planet or other point, and never inside your current sight, so a respawn is
+something you find. The scout's own sector gets the starter, 260 to 330 units
+from the scout: just out of sight, one move away. Points hide until a ship has
+charted their cell, then stay on the map. The rules are in `src/poi.rs`.
+
+The first kind is the Destroyed Space Station. Click one for its panel, and
+press Salvage while one of your ships is within 100 units: it pays 6 to 12
+Alloys and, 35% of the time, 2 to 4 Advanced Electronics, then it is gone and
+the sector's clock starts. 10 to 20 turns later a new point appears somewhere
+in that sector out of sight. Numbers are placeholders in `src/poi.rs`.
+
 ## Fog of war
 
 The map is charted but not surveyed. Every planet's position is known from the
@@ -101,7 +117,7 @@ follows the ship as it glides. A world you hold keeps
 can see. The chart lives in `src/fog.rs` as a grid of 10-unit cells and is
 uploaded to the GPU as a small texture whenever it changes; the starfield shader
 darkens the backdrop from it. Points of interest, once they exist, will be
-hidden entirely until discovered.
+hidden entirely until discovered, and they are: see points of interest above.
 
 ## Sectors and planets
 

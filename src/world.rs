@@ -2,7 +2,10 @@ use lntrn_math::Vec2;
 
 use crate::economy::{Build, PlanetState, Resources};
 use crate::fog::Fog;
+use crate::layout::REGIONS;
 use crate::planets::PLANETS;
+use crate::poi::Poi;
+use crate::rng::Rng;
 
 pub(crate) const WORLD_SIZE: Vec2 = Vec2::new(3000.0, 2000.0);
 /// A scout is fast: an average ship moves 100 per turn. It crosses the map in about
@@ -12,6 +15,8 @@ pub(crate) const SCOUT_SPEED: f64 = 150.0;
 pub(crate) const SCOUT_VISION: f64 = 225.0;
 /// A world you hold keeps one move of space around it in view.
 pub(crate) const PLANET_VISION: f64 = 150.0;
+/// The seed `Game::default` uses, so tests and the menu's placeholder agree.
+const FIXED_SEED: u64 = 0x5EED_5EED;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Side {
@@ -55,6 +60,11 @@ pub(crate) struct Game {
     pub(crate) shipyard: Option<Build>,
     /// Ids for ships launched during play; the first scout is 0.
     pub(crate) next_fleet_id: u32,
+    pub(crate) pois: Vec<Poi>,
+    /// Per sector: turns until a salvaged sector may get a new point.
+    pub(crate) respawn: Vec<u32>,
+    pub(crate) rng: Rng,
+    pub(crate) next_poi_id: u32,
 }
 
 impl Game {
@@ -84,7 +94,6 @@ impl Game {
             .collect()
     }
 
-    #[cfg(test)]
     pub(crate) fn can_see(&self, side: Side, point: Vec2) -> bool {
         self.vision_sources(side)
             .iter()
@@ -94,6 +103,13 @@ impl Game {
 
 impl Default for Game {
     fn default() -> Self {
+        Self::new(FIXED_SEED)
+    }
+}
+
+impl Game {
+    /// A fresh game. The seed decides where every point of interest lies.
+    pub(crate) fn new(seed: u64) -> Self {
         let mut game = Self {
             turn: 1,
             active_side: Side::Player,
@@ -118,11 +134,16 @@ impl Default for Game {
             stockpile: Resources::default(),
             shipyard: None,
             next_fleet_id: 1,
+            pois: Vec::new(),
+            respawn: vec![0; REGIONS.len()],
+            rng: Rng::new(seed),
+            next_poi_id: 1,
         };
         // You start knowing only what your home and your scout can see.
         for (center, radius) in game.vision_sources(Side::Player) {
             game.fog.reveal(center, radius);
         }
+        game.seed_pois();
         game
     }
 }

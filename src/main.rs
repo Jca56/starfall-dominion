@@ -12,6 +12,8 @@ mod interface;
 mod layout;
 mod map;
 mod planets;
+mod poi;
+mod rng;
 mod sector;
 mod theme;
 mod world;

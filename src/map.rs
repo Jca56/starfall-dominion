@@ -6,9 +6,11 @@ use lntrn_ui::{Sense, Ui};
 use crate::camera::{Camera, ZoomRange};
 use crate::economy::SECURE_RANGE;
 use crate::fleet;
+use crate::icons::Icon;
 use crate::layout;
 use crate::planets::PLANETS;
-use crate::sector::Sector;
+use crate::poi::SALVAGE_RANGE;
+use crate::sector::{Sector, Selection};
 use crate::theme;
 use crate::world::{Side, WORLD_SIZE};
 
@@ -73,18 +75,18 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
                 // With a ship selected, a planet is a destination, not a page.
                 fleet::order(sector, fleet_id, planet.position, now);
             } else {
-                sector.selected = Some(index);
+                sector.selected = Some(Selection::Planet(index));
                 sector.details_tab = 0;
                 sector.message = None;
             }
             ui.state.request_rebuild = true;
         }
-        let focus = if sector.selected == Some(index) || response.hovered {
+        let focus = if sector.selected == Some(Selection::Planet(index)) || response.hovered {
             1.0
         } else {
             0.45
         };
-        if sector.selected == Some(index) {
+        if sector.selected == Some(Selection::Planet(index)) {
             // How close a ship must hold to secure it, or an enemy to contest it.
             ui.draw.ring(
                 point,
@@ -154,6 +156,7 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
         ui.focus_ring(id, hit);
     }
 
+    wrecks(ui, &camera, sector, chart, on_ship, &sources, now);
     fleet::draw_all(ui, &camera, sector, chart, &hits);
     // Empty space: a click closes an open panel, or sends the selected ship.
     let response = ui.interact(ui.id("map"), ui.clip(), Sense::CLICK);
@@ -164,6 +167,75 @@ pub(crate) fn draw(ui: &mut Ui, region: Rect, sector: &mut Sector) {
             fleet::order(sector, fleet_id, camera.to_world(ui.state.press_pos), now);
             ui.state.request_rebuild = true;
         }
+    }
+}
+
+/// Points of interest a ship has charted. Undiscovered ones are not drawn and
+/// cannot be clicked, so the fog keeps its secrets.
+fn wrecks(
+    ui: &mut Ui,
+    camera: &Camera,
+    sector: &mut Sector,
+    chart: bool,
+    on_ship: bool,
+    sources: &[(Vec2, f64)],
+    now: f64,
+) {
+    let scale = ui.m.scale;
+    let style = ui.text_style();
+    for poi in sector.game.pois.clone() {
+        if !sector.chart.explored_at(poi.position) {
+            continue;
+        }
+        let point = camera.to_screen(poi.position);
+        let hit = Rect::from_center_size(point, Vec2::splat(90.0 * scale));
+        let id = ui.id(&format!("poi-{}", poi.id));
+        let sense = if on_ship { Sense::NONE } else { Sense::CLICK };
+        let mut response = ui.interact(id, hit, sense);
+        if !hit.intersection(&ui.clip()).is_empty() {
+            ui.focusable(id, hit);
+            ui.key_click(id, &mut response);
+        }
+        if response.clicked {
+            if let Some(fleet_id) = sector.selected_fleet {
+                fleet::order(sector, fleet_id, poi.position, now);
+            } else {
+                sector.selected = Some(Selection::Poi(poi.id));
+                sector.message = None;
+            }
+            ui.state.request_rebuild = true;
+        }
+        let selected = sector.selected == Some(Selection::Poi(poi.id));
+        if selected {
+            ui.draw.ring(
+                point,
+                SALVAGE_RANGE * camera.pixels_per_unit,
+                1.5 * scale,
+                theme::WRECK.fade(0.35),
+            );
+        }
+        let seen = sources
+            .iter()
+            .any(|(center, radius)| (poi.position - *center).length() <= *radius);
+        let alpha = if seen { 1.0 } else { 0.55 };
+        if selected || response.hovered {
+            ui.draw
+                .ring(point, 30.0 * scale, 2.0 * scale, theme::WRECK.fade(alpha));
+        }
+        Icon::Wreck.draw_faded(ui, point, 40.0 * scale, alpha);
+        if !chart {
+            let label = Rect::from_center_size(
+                point + Vec2::new(0.0, 48.0 * scale),
+                Vec2::new(175.0 * scale, 45.0 * scale),
+            );
+            ui.text_centered(
+                poi.kind.short_name(),
+                &style,
+                label,
+                ui.theme.text.fade(alpha.max(0.7)),
+            );
+        }
+        ui.focus_ring(id, hit);
     }
 }
 

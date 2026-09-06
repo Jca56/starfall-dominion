@@ -10,6 +10,7 @@ pub(crate) enum Icon {
     Electronics,
     Secure,
     Decay,
+    Wreck,
 }
 
 impl Icon {
@@ -19,6 +20,7 @@ impl Icon {
             Self::Electronics => "Advanced Electronics",
             Self::Secure => "Turns to secure",
             Self::Decay => "Influence lost per turn without a ship",
+            Self::Wreck => "Destroyed Space Station",
         }
     }
 
@@ -28,14 +30,19 @@ impl Icon {
             Self::Electronics => theme::ELECTRONICS,
             Self::Secure => theme::SECURE,
             Self::Decay => theme::DECAY,
+            Self::Wreck => theme::WRECK,
         }
     }
 
     /// Draw the glyph centred at `center`, about `size` physical pixels across.
     pub(crate) fn draw(self, ui: &mut Ui, center: Vec2, size: f64) {
+        self.draw_faded(ui, center, size, 1.0);
+    }
+
+    pub(crate) fn draw_faded(self, ui: &mut Ui, center: Vec2, size: f64, alpha: f64) {
         let line = (size * 0.09).max(1.5);
         let r = size * 0.5;
-        let color = self.color();
+        let color = self.color().fade(alpha);
         let at = |x: f64, y: f64| center + Vec2::new(x, y) * r;
         match self {
             Self::Alloys => {
@@ -65,6 +72,26 @@ impl Icon {
                 ];
                 ui.draw.polyline(&outline, line, color, true);
                 ui.draw.circle(at(0.0, -0.05), r * 0.18, color);
+            }
+            Self::Wreck => {
+                // A broken ring with three spokes; the fourth is gone.
+                ui.draw.arc(
+                    center,
+                    r * 0.85,
+                    0.35,
+                    std::f64::consts::TAU - 0.55,
+                    line,
+                    color,
+                );
+                for spoke in [0.8, 2.35, 3.95] {
+                    ui.draw.line(
+                        center,
+                        center + Vec2::from_angle(spoke) * r * 0.85,
+                        line,
+                        color,
+                    );
+                }
+                ui.draw.circle(center, r * 0.16, color);
             }
             Self::Decay => {
                 // An arrow draining downward.

@@ -42,6 +42,17 @@ This is an initial catalog, not a completed AI planner or action history.
   home world when the build finishes, with full movement on its first turn.
 - **Warnings:** no shipyard, shipyard busy, cannot afford.
 
+## Salvage
+
+- **Input:** a point of interest id.
+- **Available when:** it is the acting side's turn, the point exists, and one
+  of the actor's ships is within 100 units.
+- **Preview:** validation only; the loot is not known until commit.
+- **Commit:** roll the loot (Destroyed Space Station: 6 to 12 Alloys, 35% for
+  2 to 4 Advanced Electronics), add it to the stockpile, remove the point, and
+  start that sector's respawn clock at 10 to 20 turns. Returns what it paid.
+- **Warnings:** nothing there to salvage, no ship nearby.
+
 ## End Turn
 
 - **Input:** no parameters.
@@ -52,7 +63,9 @@ This is an initial catalog, not a completed AI planner or action history.
   within 200 units and no enemy is, and the planet becomes Farlight's at its
   secure count; otherwise influence decays by the planet's rate and the effort
   ends at zero. Then every Farlight planet without an enemy ship within 200
-  units pays its yield. Then the shipyard advances and launches a finished ship.
+  units pays its yield. Then the shipyard advances and launches a finished ship. Then every
+  sector without a point of interest runs its clock and, at zero, tries to
+  place one out of the player's sight.
   Finally hand control to the other side and refresh that side's fleets to
   their movement-speed budgets. Unspent movement does not accumulate.
 - **Counter:** starts at 1; advances after the Dominion finishes its turn.
